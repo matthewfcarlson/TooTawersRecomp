@@ -5,8 +5,9 @@
   "name": "twotowers-netplay",
   "main": "src/index.js",
   "compatibility_date": "2026-10-01",
-  // files first; the Worker answers what is not one (/match/<code>, /turn); a missing file is a 404, never the page
-  "assets": { "directory": "./public", "not_found_handling": "none" },
+  // files first; the Worker answers what is not one (/match/<code>, /turn, /proof); a missing file is a 404, never
+  // the page. The build (/build/) goes through the Worker first: only for players who showed they have the disc
+  "assets": { "directory": "./public", "binding": "ASSETS", "not_found_handling": "none", "run_worker_first": ["/build/*"] },
   "durable_objects": {
     "bindings": [{ "name": "MATCH", "class_name": "Match" }]
   },

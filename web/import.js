@@ -5,7 +5,12 @@
 // storage in your browser (OPFS, import-worker.js), where the game reads
 // them (web_platform.c). Nothing is uploaded anywhere.
 //
-// Then the game starts (twotowers_recomp.js). ?TT_WEB_ULTRA_BUILD=<dir> is
+// On the hosted page the game's code (build/) is only for players with the
+// disc: the server asks for the SHA-256 of three 64 KB pieces of its files,
+// answered here from the imported copy (only the hashes are sent), and a
+// cookie then opens build/ for 30 days (netplay-server/src/index.js).
+//
+// Then the game starts (build/twotowers_recomp.js). ?TT_WEB_ULTRA_BUILD=<dir> is
 // the Ultra textures' one-time build (web_ultra.cpp): the game's code run
 // for that alone, then back here.
 (function () {
@@ -23,7 +28,49 @@
     } catch { return false; }
   }
   const serverHas = (name) => fetch(name, { method: 'HEAD' }).then((r) => r.ok).catch(() => false);
-  const startGame = () => { panel.hidden = true; const s = document.createElement('script'); s.src = 'twotowers_recomp.js'; document.body.append(s); };
+  const loadGame = () => { const s = document.createElement('script'); s.src = 'build/twotowers_recomp.js'; document.body.append(s); };
+
+  // a file of the imported disc (its names as on the disc; any case, as the game asks)
+  async function discFile(rel) {
+    let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('disc');
+    const parts = rel.split('/');
+    const find = async (dir, name, kind) => {
+      try { return kind === 'dir' ? await dir.getDirectoryHandle(name) : await dir.getFileHandle(name); } catch {}
+      for await (const [n, h] of dir.entries()) if (n.toLowerCase() === name.toLowerCase() && h.kind === (kind === 'dir' ? 'directory' : 'file')) return h;
+      throw new Error(`the imported disc has no ${rel}`);
+    };
+    for (const p of parts.slice(0, -1)) d = await find(d, p, 'dir');
+    return (await find(d, parts.at(-1), 'file')).getFile();
+  }
+
+  // the hosted page's disc check: nothing to do if the build is already open to us (or this is web/serve.mjs)
+  async function unlockBuild() {
+    const head = await fetch('build/twotowers_recomp.js', { method: 'HEAD', cache: 'no-store' });
+    if (head.ok) return;
+    if (head.status !== 403) throw new Error(`the game's files could not be loaded (${head.status})`);
+    const ask = await (await fetch('proof', { cache: 'no-store' })).json();
+    if (ask.error) throw new Error(ask.error);
+    const hashes = [];
+    for (const q of ask.ask) {
+      const bytes = await (await discFile(q.path)).slice(q.offset, q.offset + q.length).arrayBuffer();
+      hashes.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join(''));
+    }
+    const r = await fetch('proof', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ exp: ask.exp, ids: ask.ids, mac: ask.mac, hashes }) });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error || `the disc check failed (${r.status})`);
+  }
+
+  async function startGame() {
+    const what = $('setup-what');
+    what.textContent = 'Checking your disc…';
+    try { await unlockBuild(); }
+    catch (e) { what.textContent = ''; $('setup-error').textContent = e.message; panel.hidden = false; await refresh(); return; }
+    what.textContent = '';
+    document.body.classList.add('playing');
+    panel.hidden = true;
+    loadGame();
+  }
 
   function run(msg, label) {
     return new Promise((resolve, reject) => {
@@ -48,6 +95,9 @@
     $('setup-ultra-state').textContent = ultra ? 'built ✓' : pack ? 'copied, not built yet' : 'not imported (optional)';
     $('setup-build').hidden = !pack || ultra;
     $('setup-play').disabled = !disc;
+    $('step-disc').classList.toggle('done', disc);
+    $('step-ultra').classList.toggle('done', ultra);
+    $('setup-play-note').textContent = disc ? (ultra ? 'Your disc and the Ultra textures are ready.' : 'Your disc is ready.') : 'Import your disc first.';
     if (navigator.storage.estimate) {
       const { usage, quota } = await navigator.storage.estimate();
       $('setup-space').textContent = `This site's storage: ${(usage / 1e9).toFixed(1)} GB used of ${(quota / 1e9).toFixed(0)} GB allowed.`;
@@ -65,6 +115,17 @@
   }
 
   $('setup-iso').onchange = (e) => e.target.files[0] && guard(() => run({ type: 'iso', file: e.target.files[0] }, 'Copying the disc'));
+  // an ISO dropped on the disc's card: as if picked
+  const drop = $('step-disc');
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault(); drop.classList.remove('over');
+    const f = [...e.dataTransfer.files].find((x) => /\.x?iso$/i.test(x.name));
+    if (!f) { $('setup-error').textContent = 'That is not an .iso file.'; return; }
+    const dt = new DataTransfer(); dt.items.add(f);
+    $('setup-iso').files = dt.files; $('setup-iso').dispatchEvent(new Event('change'));
+  });
 
   // the pack: the GLOS69 folder (unpacked from its download), put at ultra/GLOS69 whatever the folder is called;
   // then the port's own textures_ultra files from this site
@@ -103,11 +164,13 @@
         else if (/\[ULTRA-BUILD\] failed/.test(t)) what.textContent = t;
       };
       Module.onExit = (code) => { if (!code) location.search = ''; };
-      const s = document.createElement('script'); s.src = 'twotowers_recomp.js'; document.body.append(s);
+      try { await unlockBuild(); } catch (e) { $('setup-error').textContent = e.message; return; }
+      loadGame();
       return;
     }
-    // your machine's server with your disc (web/serve.mjs), or a disc imported before: straight into the game
-    if (await serverHas('disc-manifest.json') || (await opfsHas('disc/.complete') && !q.has('setup'))) return startGame();
+    // your machine's server with your disc (web/serve.mjs): straight into the game; the hosted page: the splash,
+    // with Play once the disc is in (that click also lets the sound start)
+    if (await serverHas('disc-manifest.json')) return startGame();
     panel.hidden = false;
     await refresh();
   })();

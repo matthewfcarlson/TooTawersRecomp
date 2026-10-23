@@ -3,7 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The Two Towers (web)</title>
+<title>The Two Towers</title>
+<meta name="theme-color" content="#07080c">
+<link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" crossorigin href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;1,500&display=swap">
 <style>
   :root { --bg: #111; --fg: #ddd; --dim: #888; --warn: #e8a33d; --bad: #e5534b; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
@@ -15,38 +19,168 @@
   #netplay:empty { display: none; }
   details { margin: 8px 0; }
   kbd { background: #2a2a2a; border-radius: 3px; padding: 0 4px; font-size: 12px; }
-  #setup { background: #1b1b1b; border: 1px solid #333; border-radius: 6px; padding: 12px 16px; margin: 0 0 12px; }
-  #setup h2 { margin: 0 0 8px; font-size: 18px; }
-  #setup .row { margin: 10px 0; }
-  #setup .state { color: var(--warn); margin-left: 6px; }
-  #setup progress { width: 100%; }
-  #setup-error { color: var(--bad); }
-  #setup-what, #setup-space { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
+  /* ---- the splash: your game files, then Play ---- */
+  body:not(.playing) #game { display: none; }
+  #setup { --gold: #e7c77a; --gold-hi: #fff3d1; --gold-lo: #9a7428; --ink: #07080c; --text: #e9e3d4; --muted: #a49d8c;
+    position: fixed; inset: 0; z-index: 10; overflow-x: hidden; overflow-y: auto; color: var(--text);
+    background: radial-gradient(ellipse 80% 55% at 50% 0%, #1d2638 0%, rgba(15,19,29,0) 70%),
+                linear-gradient(180deg, #0b0e16 0%, #07080c 70%, #050506 100%); }
+  #setup[hidden], #setup [hidden] { display: none !important; }
+  .sky { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  .moon { position: absolute; top: 7vh; left: 50%; width: 46vmin; height: 46vmin; transform: translateX(-50%); border-radius: 50%;
+    background: radial-gradient(circle, rgba(240,232,210,.16) 0%, rgba(240,232,210,.06) 28%, rgba(240,232,210,0) 62%); }
+  .fog { position: absolute; left: -30%; width: 160%; height: 40vh; bottom: 6vh; opacity: .5; filter: blur(18px);
+    background: radial-gradient(ellipse 30% 40% at 20% 60%, rgba(150,160,180,.18), transparent 70%),
+                radial-gradient(ellipse 25% 35% at 60% 50%, rgba(150,160,180,.14), transparent 70%),
+                radial-gradient(ellipse 30% 40% at 90% 65%, rgba(150,160,180,.16), transparent 70%);
+    animation: drift 60s linear infinite alternate; }
+  .fog.two { bottom: 0; opacity: .35; animation-duration: 90s; animation-direction: alternate-reverse; }
+  @keyframes drift { from { transform: translateX(-6%); } to { transform: translateX(6%); } }
+  .ridge { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 26vh; }
+  .tower { position: absolute; bottom: 0; height: min(78vh, 720px); width: auto; filter: drop-shadow(0 0 30px rgba(0,0,0,.8)); }
+  .tower.left { left: max(-40px, calc(50% - 760px)); }
+  .tower.right { right: max(-50px, calc(50% - 780px)); }
+  .ember-glow { animation: smoulder 4.5s ease-in-out infinite; transform-origin: center; }
+  @keyframes smoulder { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+  .ember { position: absolute; bottom: -10px; width: 3px; height: 3px; border-radius: 50%; background: #ffb35a;
+    box-shadow: 0 0 8px 2px rgba(255,140,40,.6); opacity: 0; animation: rise linear infinite; }
+  @keyframes rise { 0% { transform: translate(0, 0); opacity: 0; } 10% { opacity: .9; }
+                    100% { transform: translate(var(--dx, 30px), -85vh); opacity: 0; } }
+  .hero { position: relative; max-width: 1040px; margin: 0 auto; padding: max(7vh, 40px) 16px 48px; text-align: center; }
+  .eyebrow { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .38em; text-transform: uppercase; color: var(--gold); opacity: .85; }
+  .title { margin: 18px 0 6px; font-family: Cinzel, 'Trajan Pro', Georgia, serif; font-weight: 600; line-height: .95;
+    font-size: clamp(46px, 10vw, 118px); letter-spacing: .02em;
+    background: linear-gradient(180deg, var(--gold-hi) 0%, var(--gold) 48%, var(--gold-lo) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 2px 0 rgba(0,0,0,.6)) drop-shadow(0 0 28px rgba(231,199,122,.22)); }
+  .title small { display: block; font-size: .3em; letter-spacing: .5em; margin: 0 0 .5em; color: transparent; }
+  .divider { display: block; width: min(420px, 80%); height: 18px; margin: 18px auto; }
+  .dedication { margin: 0 auto 36px; font: italic 500 clamp(19px, 2.6vw, 27px)/1.3 'Cormorant Garamond', Georgia, serif;
+    color: #efe4c8; text-shadow: 0 0 18px rgba(231,199,122,.25); }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; text-align: left; }
+  .card { position: relative; padding: 22px 22px 20px; border-radius: 16px; border: 1px solid rgba(231,199,122,.2);
+    background: linear-gradient(180deg, rgba(30,33,43,.74), rgba(13,14,19,.82)); backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
+    transition: border-color .25s, transform .25s, box-shadow .25s; }
+  .card.over { border-color: var(--gold); transform: translateY(-2px); box-shadow: 0 0 0 4px rgba(231,199,122,.12), 0 20px 50px rgba(0,0,0,.5); }
+  .card h3 { margin: 0 0 6px; display: flex; align-items: center; gap: 12px; font: 600 19px/1.2 Cinzel, Georgia, serif; letter-spacing: .04em; color: var(--gold-hi); }
+  .num { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font: 600 14px/1 Cinzel, Georgia, serif;
+    color: var(--gold); border: 1px solid rgba(231,199,122,.5); }
+  .card.done .num { background: linear-gradient(180deg, var(--gold-hi), var(--gold)); color: var(--ink); border-color: transparent; font-size: 0; }
+  .card.done .num::after { content: '✓'; font-size: 15px; }
+  .card p { margin: 0 0 14px; color: var(--muted); font: 14px/1.5 system-ui, sans-serif; }
+  .card .opt { font: 600 10px/1 system-ui, sans-serif; letter-spacing: .2em; text-transform: uppercase; color: var(--muted);
+    border: 1px solid rgba(255,255,255,.15); border-radius: 99px; padding: 4px 8px; }
+  .drop { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 20px 14px; border-radius: 12px; text-align: center;
+    border: 1.5px dashed rgba(231,199,122,.35); background: rgba(231,199,122,.03); color: var(--muted); font: 13px/1.4 system-ui, sans-serif; }
+  .card.done .drop { border-style: solid; border-color: rgba(231,199,122,.2); }
+  .state { color: var(--gold); font: 600 12px/1.3 system-ui, sans-serif; letter-spacing: .04em; }
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; border-radius: 10px;
+    padding: 10px 16px; font: 600 13px/1 system-ui, sans-serif; letter-spacing: .03em; color: var(--gold-hi);
+    background: rgba(231,199,122,.08); border: 1px solid rgba(231,199,122,.35); transition: background .2s, border-color .2s; }
+  .btn:hover { background: rgba(231,199,122,.16); border-color: var(--gold); }
+  .btn:focus-visible, #setup-play:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 3px; }
+  input:disabled + .btn, .btn:disabled { opacity: .45; pointer-events: none; }
+  .play { margin: 34px auto 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #setup-play { cursor: pointer; border: 0; border-radius: 999px; padding: 18px 46px; color: var(--ink);
+    font: 700 clamp(15px, 2vw, 18px)/1 Cinzel, Georgia, serif; letter-spacing: .22em; text-transform: uppercase;
+    background: linear-gradient(180deg, var(--gold-hi) 0%, var(--gold) 55%, #c49a45 100%);
+    box-shadow: 0 0 0 1px rgba(255,243,209,.4), 0 10px 40px rgba(231,199,122,.35), inset 0 -2px 0 rgba(0,0,0,.2);
+    transition: transform .2s, box-shadow .2s, filter .2s; }
+  #setup-play:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(255,243,209,.6), 0 14px 54px rgba(231,199,122,.5); }
+  #setup-play:disabled { cursor: default; filter: grayscale(.85) brightness(.55); box-shadow: none; }
+  #setup-play-note { color: var(--muted); font: 13px/1.4 system-ui, sans-serif; }
+  #setup progress { -webkit-appearance: none; appearance: none; width: min(560px, 100%); height: 6px; margin: 26px auto 0; display: block;
+    border: 0; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.08); }
+  #setup progress[hidden] { display: none; }
+  #setup progress::-webkit-progress-bar { background: rgba(255,255,255,.08); }
+  #setup progress::-webkit-progress-value { background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi)); border-radius: 99px; }
+  #setup progress::-moz-progress-bar { background: linear-gradient(90deg, var(--gold-lo), var(--gold-hi)); border-radius: 99px; }
+  #setup-what { margin: 10px auto 0; max-width: 640px; color: var(--text); font: 13px/1.4 system-ui, sans-serif; overflow-wrap: anywhere; }
+  #setup-error { margin: 10px auto 0; max-width: 640px; color: #ff8a7a; font: 600 14px/1.4 system-ui, sans-serif; }
+  .privacy { max-width: 640px; margin: 44px auto 0; color: var(--muted); font: 12px/1.6 system-ui, sans-serif; }
+  .privacy a { color: var(--gold); }
+  #setup-space { margin-top: 6px; color: #777064; font: 12px/1.4 system-ui, sans-serif; }
+  #setup-forget { background: none; border: 0; padding: 0; color: var(--muted); font: 12px system-ui, sans-serif; text-decoration: underline; cursor: pointer; }
+  @media (prefers-reduced-motion: reduce) { .fog, .ember, .ember-glow { animation: none; } .ember { display: none; } }
+  @media (max-width: 720px) { .tower { opacity: .45; height: 52vh; } .eyebrow { letter-spacing: .2em; font-size: 11px; } }
   #log { height: 220px; overflow: auto; background: #000; color: #9c9; font: 12px/1.35 ui-monospace, monospace;
          padding: 8px; white-space: pre-wrap; margin: 0; }
 </style>
 </head>
 <body>
 <main>
-  <section id="setup" hidden>
-    <h2>Your game files</h2>
-    <p>The game runs from your own copy. Pick it once: it is copied into this site's storage in your browser
-       (a few minutes, about 4.5 GB) and never leaves your machine.</p>
-    <div id="setup-choices">
-      <div class="row">1. Your disc, the Xbox ISO (USA):
-        <input type="file" id="setup-iso" accept=".iso,.xiso"><span class="state" id="setup-disc-state"></span></div>
-      <div class="row">2. Optional, the Ultra textures: the GameCube pack's <code>GLOS69</code> folder (unpack the
-        download first), then build it once:
-        <input type="file" id="setup-pack" webkitdirectory><span class="state" id="setup-ultra-state"></span>
-        <button id="setup-build" hidden>Build the Ultra textures</button></div>
-      <div class="row"><button id="setup-play" disabled>Play</button>
-        <button id="setup-forget">Remove the imported files</button></div>
+  <section id="setup" hidden aria-labelledby="splash-title">
+    <div class="sky" aria-hidden="true">
+      <div class="moon"></div>
+      <svg class="tower left" viewBox="0 0 200 620" preserveAspectRatio="xMidYMax meet">
+        <defs><linearGradient id="stone" x1="0" x2="1"><stop offset="0" stop-color="#05060a"/><stop offset=".5" stop-color="#11141c"/><stop offset="1" stop-color="#05060a"/></linearGradient></defs>
+        <path fill="url(#stone)" d="M40 620 L58 576 L72 576 L84 160 L72 134 L79 66 L90 124 L96 46 L100 118 L104 46 L110 124 L121 66 L128 134 L116 160 L128 576 L142 576 L160 620 Z"/>
+        <path stroke="rgba(231,199,122,.08)" stroke-width="1" fill="none" d="M92 170 L92 570 M108 170 L108 570"/>
+      </svg>
+      <svg class="tower right" viewBox="0 0 240 660" preserveAspectRatio="xMidYMax meet">
+        <defs><radialGradient id="ember" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffd27a"/><stop offset=".35" stop-color="#ff7a1a" stop-opacity=".8"/><stop offset="1" stop-color="#ff5a00" stop-opacity="0"/></radialGradient></defs>
+        <circle class="ember-glow" cx="120" cy="104" r="46" fill="url(#ember)"/>
+        <path fill="url(#stone)" d="M24 660 L50 572 L64 572 L70 482 L84 482 L90 340 L100 340 L106 206 L113 206 L110 126 L96 58 L114 98 L120 138 L126 98 L144 58 L130 126 L127 206 L134 206 L140 340 L150 340 L156 482 L170 482 L176 572 L190 572 L216 660 Z"/>
+      </svg>
+      <svg class="ridge" viewBox="0 0 1440 260" preserveAspectRatio="none">
+        <path fill="#0a0c12" d="M0 260 L0 170 L90 120 L170 150 L260 92 L360 140 L450 104 L560 150 L660 112 L760 160 L860 118 L980 154 L1080 100 L1190 146 L1300 110 L1440 150 L1440 260 Z"/>
+        <path fill="#050608" d="M0 260 L0 210 L140 180 L300 214 L470 186 L640 220 L820 190 L1000 222 L1180 192 L1340 216 L1440 200 L1440 260 Z"/>
+      </svg>
+      <div class="fog"></div><div class="fog two"></div>
+      <div id="embers"></div>
     </div>
-    <progress id="setup-progress" hidden></progress>
-    <div id="setup-what"></div>
-    <div id="setup-error"></div>
-    <div id="setup-space"></div>
+    <div class="hero">
+      <div class="eyebrow">Xbox · recompiled · in your browser</div>
+      <h1 class="title" id="splash-title">The Two Towers</h1>
+      <svg class="divider" viewBox="0 0 420 18" aria-hidden="true">
+        <path d="M0 9 H182 M238 9 H420" stroke="url(#rule)" stroke-width="1"/>
+        <path d="M210 1 L218 9 L210 17 L202 9 Z" fill="#e7c77a"/><circle cx="192" cy="9" r="2" fill="#e7c77a"/><circle cx="228" cy="9" r="2" fill="#e7c77a"/>
+        <defs><linearGradient id="rule"><stop offset="0" stop-color="#e7c77a" stop-opacity="0"/><stop offset=".5" stop-color="#e7c77a"/><stop offset="1" stop-color="#e7c77a" stop-opacity="0"/></linearGradient></defs>
+      </svg>
+      <p class="dedication">for Michael with love from Matthew</p>
+
+      <div class="steps" id="setup-choices">
+        <div class="card" id="step-disc">
+          <h3><span class="num">1</span>Your disc</h3>
+          <p>The game runs from your own copy of the Xbox disc (USA). Pick the ISO once: it is copied into this
+             browser's storage (about 4.5 GB, under a minute).</p>
+          <div class="drop">
+            <span>Drop your <b>.iso</b> here, or</span>
+            <input type="file" id="setup-iso" class="visually-hidden" accept=".iso,.xiso">
+            <label for="setup-iso" class="btn">Choose the ISO…</label>
+            <span class="state" id="setup-disc-state"></span>
+          </div>
+        </div>
+        <div class="card" id="step-ultra">
+          <h3><span class="num">2</span>Ultra textures <span class="opt">optional</span></h3>
+          <p>The high-resolution texture pack: unpack its download and pick the <code>GLOS69</code> folder, then
+             build it once (several minutes).</p>
+          <div class="drop">
+            <input type="file" id="setup-pack" class="visually-hidden" webkitdirectory>
+            <label for="setup-pack" class="btn">Choose the GLOS69 folder…</label>
+            <button id="setup-build" class="btn" hidden>Build the Ultra textures</button>
+            <span class="state" id="setup-ultra-state"></span>
+          </div>
+        </div>
+      </div>
+      <div class="play">
+        <button id="setup-play" disabled>Enter Middle-earth</button>
+        <div id="setup-play-note"></div>
+      </div>
+      <progress id="setup-progress" hidden></progress>
+      <div id="setup-what" role="status"></div>
+      <div id="setup-error" role="alert"></div>
+      <div class="privacy">
+        Your files never leave this machine. To open the game, the site asks for the fingerprints (SHA-256) of three
+        small pieces of your disc and checks them; nothing else is sent.
+        <div id="setup-space"></div>
+        <button id="setup-forget">Remove the imported files</button>
+      </div>
+    </div>
   </section>
+  <div id="game">
   <canvas id="ttmain" width="1" height="1" hidden></canvas>
   <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
   <div id="status">Loading…</div>
@@ -62,6 +196,7 @@
        starts in the first level. Any <code>KEY=VALUE</code> becomes one of the game's switches.</p>
   </details>
   <pre id="log"></pre>
+  </div>
 </main>
 <script>
   const statusEl = document.getElementById('status');
@@ -95,6 +230,7 @@
 
   if (!self.crossOriginIsolated) {
     status('This page needs cross-origin isolation for threads. Serve it with web/serve.mjs.', true);
+    document.getElementById('setup-error').textContent = 'This browser did not give the page the isolation its threads need: try Chrome or Firefox.';
     throw new Error('not cross-origin isolated');
   }
 
@@ -250,6 +386,21 @@
   canvas.addEventListener('blur', () => { if (ready && !ended) for (let vk = 0; vk < 256; vk++) Module._tt_web_key(vk, 0); });
   canvas.addEventListener('click', () => { canvas.focus(); startAudio().catch((err) => log('[WEB] sound could not start: ' + err)); });
   canvas.focus();
+</script>
+<script>
+  // the splash's embers (decoration)
+  (function () {
+    const box = document.getElementById('embers');
+    for (let i = 0; i < 18; i++) {
+      const e = document.createElement('span');
+      e.className = 'ember';
+      e.style.left = `${55 + Math.random() * 40}%`;
+      e.style.setProperty('--dx', `${-60 + Math.random() * 120}px`);
+      e.style.animationDuration = `${9 + Math.random() * 10}s`;
+      e.style.animationDelay = `${-Math.random() * 18}s`;
+      box.append(e);
+    }
+  })();
 </script>
 <script src="netplay.js"></script>
 <!-- the game (twotowers_recomp.js) starts from here once its files are there -->

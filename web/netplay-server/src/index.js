@@ -6,6 +6,17 @@
 //   POST /turn           ICE servers for the RTCPeerConnection: Cloudflare's
 //                        TURN when TURN_KEY_ID and TURN_KEY_API_TOKEN are set
 //                        (wrangler secret put), else Cloudflare's STUN only
+//   GET  /proof          three questions about the player's disc
+//   POST /proof          the answers: a cookie that opens /build/ (30 days)
+//   GET  /build/*        the build (the game's code, translated from the
+//                        disc): only with that cookie
+//
+// The proof: the build is only for players who have the disc. The page has
+// it in the browser's storage (import.js); the questions are SHA-256 hashes of
+// 64 KB pieces of its files, picked at random from a table made from the disc
+// at deploy time (web/site.mjs -> gen/disc-proof.json, never committed: hashes
+// only, nothing of the disc). Only hashes cross the network. Signed with
+// BUILD_SECRET (wrangler secret put; .dev.vars locally, made by site.mjs).
 //
 // Inside a match (JSON text messages, binary relayed as is):
 //   server -> client  {type:"welcome", role:"host"|"guest", peer:bool}
@@ -17,6 +28,7 @@
 //                                            channel cannot connect (relay)
 // A third connection is told {type:"full"} and closed (code 4000).
 import { DurableObject } from "cloudflare:workers";
+import proofTable from "../gen/disc-proof.json";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -38,12 +50,81 @@ export default {
     }
 
     if (url.pathname === "/turn" && request.method === "POST") return iceServers(env);
+    if (url.pathname === "/proof") return proof(request, env);
+    if (url.pathname.startsWith("/build/")) return build(request, env);
 
     // (the site's files are answered before this, web/site.mjs; anything else is not here -- the page asks for
     // disc-manifest.json to learn whether a server holds the disc, and on the hosted site none does)
     return new Response("not found", { status: 404, headers: CORS });
   },
 };
+
+// ---- the disc proof and the build behind it ----
+const QUESTIONS = 3, ASK_TTL = 300, PASS_TTL = 30 * 86400, COOKIE = "tt_disc";
+const ISOLATION = {   // (the page's threads need these on every file; _headers covers the public ones)
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
+const enc = new TextEncoder();
+async function sign(env, text) {
+  const key = await crypto.subtle.importKey("raw", enc.encode(env.BUILD_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(mac))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function same(a, b) {   // (constant time)
+  if (typeof a !== "string" || typeof b !== "string" || a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return d === 0;
+}
+const now = () => Math.floor(Date.now() / 1000);
+
+async function hasPass(request, env) {
+  const m = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)tt_disc=(\d+)\.([A-Za-z0-9_-]+)/);
+  return !!m && Number(m[1]) > now() && same(m[2], await sign(env, "pass." + m[1]));
+}
+
+async function proof(request, env) {
+  if (!env.BUILD_SECRET || !proofTable.questions?.length)
+    return Response.json({ error: "this server is not set up for the disc check" }, { status: 503 });
+  if (request.method === "GET") {
+    const pick = new Set();
+    const r = new Uint32Array(QUESTIONS * 4);
+    crypto.getRandomValues(r);
+    for (const x of r) { if (pick.size === QUESTIONS) break; pick.add(x % proofTable.questions.length); }
+    const ids = [...pick], exp = now() + ASK_TTL;
+    return Response.json({
+      exp, ids, mac: await sign(env, `ask.${exp}.${ids.join(",")}`),
+      ask: ids.map((i) => { const q = proofTable.questions[i]; return { path: q.path, offset: q.offset, length: q.length }; }),
+    }, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (request.method !== "POST") return new Response("GET or POST", { status: 405 });
+  let body;
+  try { body = await request.json(); } catch { return Response.json({ error: "bad request" }, { status: 400 }); }
+  const { exp, ids, mac, hashes } = body || {};
+  if (!Array.isArray(ids) || !Array.isArray(hashes) || ids.length !== QUESTIONS || hashes.length !== QUESTIONS ||
+      !(Number(exp) > now()) || !same(mac, await sign(env, `ask.${exp}.${ids.join(",")}`)))
+    return Response.json({ error: "the questions ran out or were changed: ask again" }, { status: 400 });
+  const right = ids.every((id, k) => same(String(hashes[k]).toLowerCase(), proofTable.questions[id]?.sha256));
+  if (!right)
+    return Response.json({ error: "that disc is not the one this build was made from (The Two Towers, Xbox, USA)" }, { status: 403 });
+  const until = now() + PASS_TTL;
+  return Response.json({ ok: true, until }, { headers: {
+    "Cache-Control": "no-store",
+    "Set-Cookie": `${COOKIE}=${until}.${await sign(env, "pass." + until)}; Path=/; Max-Age=${PASS_TTL}; HttpOnly; Secure; SameSite=Strict`,
+  } });
+}
+
+async function build(request, env) {
+  if (!env.BUILD_SECRET || !(await hasPass(request, env)))
+    return new Response("the build is for players with the disc: import it on the first page", { status: 403, headers: { ...ISOLATION, "Cache-Control": "no-store" } });
+  const r = await env.ASSETS.fetch(request);
+  const h = new Headers(r.headers);
+  for (const [k, v] of Object.entries(ISOLATION)) h.set(k, v);
+  h.set("Cache-Control", "private, max-age=3600");   // (never a shared cache: it is only for this player)
+  return new Response(r.body, { status: r.status, headers: h });
+}
 
 async function iceServers(env) {
   const stun = [{ urls: "stun:stun.cloudflare.com:3478" }];

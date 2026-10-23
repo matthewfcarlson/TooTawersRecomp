@@ -60,7 +60,18 @@ node web/tools/hosted-check.mjs --iso <your .iso>     # a fresh browser through 
 ```
 
 One Worker serves the files and the online co-op server on one origin (`wrangler.jsonc`: static assets first, the
-Worker for `/match/<code>` and `/turn`); `_headers` gives the files the cross-origin isolation threads need.
+Worker for `/match/<code>`, `/turn` and `/proof`); `_headers` gives the files the cross-origin isolation threads need.
+
+**The build is only for players with the disc.** It sits under `/build/`, which the Worker answers first: without a
+pass it is a 403. To get one, the page answers three questions about the imported disc: the SHA-256 of three 64 KB
+pieces of its files, picked at random from 512 that `site.mjs` hashes from your disc at deploy time
+(`gen/disc-proof.json`: hashes only, never committed). Right answers give a signed cookie (30 days). The signing key is
+the Worker's secret `BUILD_SECRET` (`wrangler secret put BUILD_SECRET` once; `site.mjs` makes one in `.dev.vars` for
+`wrangler dev`); without it the build stays closed. This keeps the translated code from being handed to anyone who
+doesn't have the disc; someone who passes could still copy what their browser downloaded.
+
+The splash (`index.html`, `#setup`) shows on every visit to the hosted page: the disc, the optional Ultra textures,
+then Play (which also counts as the click browsers need before sound starts).
 
 ## Online co-op (in progress)
 

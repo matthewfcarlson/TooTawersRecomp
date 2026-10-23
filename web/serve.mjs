@@ -133,7 +133,8 @@ http.createServer((req, res) => {
     const f = icase(under(disc, url.slice('/disc/'.length)));
     return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
   }
-  const f = under(build, url.slice(1));
+  // the build: /build/ as on the hosted site (no disc check here: your machine, your disc)
+  const f = under(build, url.replace(/^\/build\//, ''));
   return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
 }).listen(port, '127.0.0.1', () => {
   console.log(`The Two Towers (web): http://localhost:${port}/`);
