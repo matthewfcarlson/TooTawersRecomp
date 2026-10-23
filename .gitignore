@@ -51,3 +51,7 @@ tools/coop-bot/config.ps1
 
 # (web port) the browser test tools' packages
 /web/tools/node_modules/
+
+# (web port) the texture pack and what is built from it (not ours to publish)
+/textures/
+*.rar
