@@ -15,26 +15,34 @@ import path from 'node:path';
 
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let port = 8080, build = path.join(repo, 'build-web'), disc = path.join(repo, 'isos', 'extracted');
+// the Ultra textures: a folder with GLOS69/ (the pack) and textures_ultra/ (built by twotowers-setup ultra)
+let ultra = fs.existsSync(path.join(repo, 'textures', 'textures_ultra', 'built.txt')) ? path.join(repo, 'textures') : null;
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--port') port = Number(argv[++i]);
   else if (argv[i] === '--build') build = path.resolve(argv[++i]);
   else if (argv[i] === '--disc') disc = path.resolve(argv[++i]);
+  else if (argv[i] === '--ultra') ultra = argv[++i] === 'off' ? null : path.resolve(argv[i]);
 }
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
   '.wasm': 'application/wasm', '.json': 'application/json', '.css': 'text/css' };
 
-function manifest() {
+function listFiles(root, subdirs) {
   const out = [];
   const walk = (dir, rel) => {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
       const p = path.join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) walk(p, r);
-      else if (e.isFile()) out.push(`${fs.statSync(p).size} ${r}`);
+      else if (e.isFile() && !/\.(part|ini)$/i.test(e.name)) out.push(`${fs.statSync(p).size} ${r}`);
     }
   };
-  walk(disc, '');
+  for (const sub of subdirs) if (fs.existsSync(path.join(root, sub))) walk(path.join(root, sub), sub);
+  return out;
+}
+
+function manifest() {
+  const out = listFiles(disc, ['']).map((l) => l.replace(/ \//, ' '));
   // (saves: the game's own UDATA/TDATA, written beside the disc by the desktop build; the page keeps its own)
   return out.filter((l) => !/^\d+ (UDATA|TDATA)\//i.test(l)).join('\n') + '\n';
 }
@@ -80,10 +88,10 @@ function under(root, rel) {
 }
 
 // the disc's own spelling of a path (the game asks in lower case)
-function icase(p) {
+function icase(p, root = disc) {
   if (!p || fs.existsSync(p)) return p;
-  let cur = disc;
-  for (const part of path.relative(disc, p).split(path.sep)) {
+  let cur = root;
+  for (const part of path.relative(root, p).split(path.sep)) {
     let names;
     try { names = fs.readdirSync(cur); } catch { return p; }
     const hit = names.find((n) => n.toLowerCase() === part.toLowerCase());
@@ -98,6 +106,13 @@ http.createServer((req, res) => {
   const url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
   if (url === '/' || url === '/index.html') return sendFile(req, res, path.join(repo, 'web', 'index.html'));
   if (url === '/disc-manifest.json') return send(res, 200, { 'Content-Type': 'text/plain' }, manifest());
+  if (url === '/ultra-manifest.json')
+    return ultra ? send(res, 200, { 'Content-Type': 'text/plain' }, listFiles(ultra, ['GLOS69', 'textures_ultra']).join('\n') + '\n')
+                 : send(res, 404, {}, 'no Ultra textures');
+  if (url.startsWith('/ultra/') && ultra) {
+    const f = icase(under(ultra, url.slice('/ultra/'.length)), ultra);
+    return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
+  }
   if (url.startsWith('/disc/')) {
     const f = icase(under(disc, url.slice('/disc/'.length)));
     return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
@@ -106,5 +121,5 @@ http.createServer((req, res) => {
   return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
 }).listen(port, '127.0.0.1', () => {
   console.log(`The Two Towers (web): http://localhost:${port}/`);
-  console.log(`  build ${build}\n  disc  ${disc}`);
+  console.log(`  build ${build}\n  disc  ${disc}\n  ultra ${ultra ?? '(none: textures/ with a built textures_ultra, or --ultra <dir>)'}`);
 });

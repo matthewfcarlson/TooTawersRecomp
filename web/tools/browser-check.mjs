@@ -60,6 +60,8 @@ await page.waitForTimeout(seconds * 1000);
 const status = await page.textContent('#status').catch(() => '(no status)');
 const gameLog = await page.evaluate(() => (self.ttLogLines || []).join('\n'), null, { timeout: 30000 }).catch(() => '');
 fs.writeFileSync(path.join(out, 'game-log.txt'), gameLog);
+const keyLines = await page.evaluate(() => (self.ttKeyLines || []).join('\n'), null, { timeout: 30000 }).catch(() => '');
+fs.writeFileSync(path.join(out, 'key-lines.txt'), keyLines);
 await page.screenshot({ path: path.join(out, 'screen.png'), timeout: 90000 }).catch((e) => console.log('screenshot failed: ' + e.message.split('\n')[0]));
 await page.locator('#screen').screenshot({ path: path.join(out, 'canvas.png') }).catch(() => {});
 fs.writeFileSync(path.join(out, 'console.txt'), consoleLines.join('\n'));
@@ -69,4 +71,5 @@ const bad = consoleLines.filter((l) => /pageerror|\[error\]|RuntimeError|Aborted
 console.log(`page: ${full}\nstatus: ${status}\noutput: ${out}`);
 if (bad.length) console.log('PROBLEMS:\n  ' + bad.slice(0, 10).map((l) => l.slice(0, 220)).join('\n  '));
 console.log('console:\n  ' + consoleLines.slice(-6).map((l) => l.slice(0, 220)).join('\n  '));
+console.log('key lines:\n  ' + keyLines.split('\n').filter((l) => /\[(WEB|ULTRA|GL)\]/.test(l)).slice(0, 14).map((l) => l.slice(0, 200)).join('\n  '));
 console.log('game log (end):\n  ' + gameLog.split('\n').filter((l) => l.trim() && !/UNIMPL/.test(l)).slice(-14).map((l) => l.slice(0, 220)).join('\n  '));

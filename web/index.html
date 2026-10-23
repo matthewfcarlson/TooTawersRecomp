@@ -44,7 +44,7 @@
   const lines = [];
   let logDirty = false;
   const keyLines = [];   // the lines worth keeping whatever scrolls past (web/tools read them)
-  const KEY = /\[(INPUT|WEB|GL|AUDIO|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
+  const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
   function log(text) {
     if (KEY.test(text) && keyLines.length < 2000) keyLines.push(text);
     lines.push(text);

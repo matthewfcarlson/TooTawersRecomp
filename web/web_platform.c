@@ -35,35 +35,38 @@ static void *exit_after(void *p)
     exit(0);
 }
 
-/* The disc, from the page's server: the manifest names every file (a fetch
- * backend lists nothing by itself), and each is fetched in chunks when read. */
-static void mount_disc(void)
+/* A folder from the page's server, at mount (/disc, /ultra): the manifest
+ * names every file (a fetch backend lists nothing by itself), and each is
+ * fetched in chunks when read. Returns the number of files, -1 if the server
+ * has no such folder. */
+static int mount_fetched(const char *manifest, const char *base_url, const char *mount)
 {
     char *list = (char *)EM_ASM_PTR({
         var x = new XMLHttpRequest();   /* (synchronous: this is a worker) */
-        x.open('GET', 'disc-manifest.json', false);
+        x.open('GET', UTF8ToString($0), false);
         x.send();
         return x.status == 200 ? stringToNewUTF8(x.responseText) : 0;
-    });
+    }, manifest);
     backend_t b;
     char *line, *save = NULL;
     int n = 0;
-    if (!list) { fprintf(stderr, "[WEB] no disc-manifest.json from the server: no disc\n"); return; }
+    size_t ml = strlen(mount);
+    if (!list) return -1;
     /* names matched without regard to case, as on the console (the disc has
      * Default.xbe, the game opens default.xbe); the fetches then ask for
      * lower-case paths, which the server matches the same way */
-    b = wasmfs_create_fetch_backend("disc", 4u << 20);
+    b = wasmfs_create_fetch_backend(base_url, 4u << 20);
     if (b) b = wasmfs_create_icase_backend(b);
-    if (!b || wasmfs_create_directory("/disc", 0777, b) != 0) {
-        fprintf(stderr, "[WEB] could not create /disc\n");
+    if (!b || wasmfs_create_directory(mount, 0777, b) != 0) {
+        fprintf(stderr, "[WEB] could not create %s\n", mount);
         free(list);
-        return;
+        return -1;
     }
     for (line = strtok_r(list, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
         char *path = strchr(line, ' '), full[1024], *sl;
         if (!path) continue;
-        snprintf(full, sizeof full, "/disc/%s", path + 1);
-        for (sl = full + 6; (sl = strchr(sl, '/')) != NULL; sl++) {   /* its folders first */
+        snprintf(full, sizeof full, "%s/%s", mount, path + 1);
+        for (sl = full + ml + 1; (sl = strchr(sl, '/')) != NULL; sl++) {   /* its folders first */
             *sl = 0;
             mkdir(full, 0777);
             *sl = '/';
@@ -74,8 +77,25 @@ static void mount_disc(void)
         }
     }
     free(list);
+    return n;
+}
+
+static void mount_disc(void)
+{
+    int n = mount_fetched("disc-manifest.json", "disc", "/disc");
+    if (n < 0) { fprintf(stderr, "[WEB] no disc-manifest.json from the server: no disc\n"); return; }
     setenv("TWOTOWERS_GAME_DIR", "/disc", 0);
     fprintf(stderr, "[WEB] disc: %d files, fetched as they are read\n", n);
+    /* The Ultra textures (the GLOS69 pack and what is built from it), when
+     * the server has them (web/serve.mjs --ultra): on unless the address
+     * says TT_ULTRA_TEX=0, within a smaller memory budget than the desktop's */
+    n = mount_fetched("ultra-manifest.json", "ultra", "/ultra");
+    if (n > 0) {
+        setenv("RECOMP_ULTRA_ROOT", "/ultra", 0);
+        setenv("TT_ULTRA_TEX", "1", 0);
+        setenv("RECOMP_ULTRA_MB", "768", 0);
+        fprintf(stderr, "[WEB] Ultra textures: %d files (%s)\n", n, atoi(getenv("TT_ULTRA_TEX")) ? "on" : "off");
+    }
 }
 
 void tt_web_init(int argc, char **argv)

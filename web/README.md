@@ -30,6 +30,12 @@ Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canv
 the levels run at the game's 30 frames/s. `?RECOMP_RENDERER=software` uses the CPU renderer instead (a few
 frames/s in a level), `?TT_WEB_SIZE=1920x1440` sets the canvas's resolution (default 1280x960).
 
+**Ultra textures** (the GameCube high-resolution pack, GLOS69, downloaded separately): unpack its `GLOS69` folder
+into `textures/` at the repository's root, copy the port's `twotowers/tools/ultra_textures/{masks,recipe.txt,pairs.txt}`
+into `textures/textures_ultra/`, and build it once with `twotowers-setup ultra` run from `textures/` (a native
+build's; a few minutes). `serve.mjs` then serves it (`--ultra <dir>` elsewhere, `--ultra off` without) and the page
+turns it on; `?TT_ULTRA_TEX=0` turns it off. It is fetched as the game pairs textures, like the disc.
+
 Sound starts on the first click or key (browsers allow nothing sooner): the emulated APU's output goes through a
 ring in the shared memory to an AudioWorklet. Controllers go through the browser's Gamepad API (press a button on
 one so the browser shows it), with rumble where the browser supports it; the game's own device and co-op settings

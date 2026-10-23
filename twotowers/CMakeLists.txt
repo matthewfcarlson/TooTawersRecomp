@@ -98,6 +98,8 @@ set(GAME_SOURCES
     tools/ultra_textures/lodepng.cpp
     src/menus.c
     src/options.c
+    src/tt_statehash.c
+    src/tt_netplay.c
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c
@@ -198,8 +200,15 @@ if(EMSCRIPTEN)
         # handed to it (nv2a_pb_scan.c); main() gets a hidden one (#ttmain)
         -sOFFSCREENCANVAS_SUPPORT=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2
         "-sOFFSCREENCANVASES_TO_PTHREAD=#ttmain"
+        # WebGL uploads as views of exactly the data, not (heap, 32-bit offset):
+        # the heap reaches past 4 GB, and offsets past 2^31/2^32 went wrong
+        # (Ultra textures drew as noise; Firefox bug 1838218). Emscripten
+        # picks the garbage-free offset form unless an older Firefox is targeted.
+        -sMIN_FIREFOX_VERSION=140
         "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stringToNewUTF8"
         "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/../web/opfs_fix.js"
+        "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/../web/fetch_fix.js"
+        "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/../web/node_prejs.js"
         -sASSERTIONS=1 --profiling-funcs)
     set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".js")
 endif()

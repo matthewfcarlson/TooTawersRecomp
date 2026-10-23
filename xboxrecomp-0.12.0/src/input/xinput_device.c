@@ -1390,7 +1390,19 @@ extern void xbox_GfxMenuPad(XBOX_INPUT_STATE *st);
 void (*volatile xbox_pad_observer)(DWORD port, const XBOX_INPUT_STATE *st);
 void (*volatile xbox_pad_filter)(DWORD port, XBOX_INPUT_STATE *st);
 static void vib_apply(DWORD port);
+/* (netplay) The input a game frame sees, fixed at the frame's start: with a
+ * latch installed (the title's lockstep code), every poll in the frame gets
+ * the latched state for its port -- the local devices are read through
+ * xbox_InputGetStateLocal, by the latch's owner, once a frame. */
+int (*volatile xbox_input_latch)(DWORD port, XBOX_INPUT_STATE *state);
+DWORD xbox_InputGetStateLocal(DWORD dwPort, XBOX_INPUT_STATE *pState);
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
+{
+    int (*latch)(DWORD, XBOX_INPUT_STATE *) = xbox_input_latch;
+    if (latch && pState) return latch(dwPort, pState) ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
+    return xbox_InputGetStateLocal(dwPort, pState);
+}
+DWORD xbox_InputGetStateLocal(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     DWORD r = input_get_raw(dwPort, pState);
     if (r == ERROR_SUCCESS && !game_in_front()) {

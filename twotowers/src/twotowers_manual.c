@@ -641,6 +641,13 @@ void sub_000E3350(void)
     float ms; uint32_t w;
     if (!xbox_pad_clock) xbox_pad_clock = tt_game_clock;
     tt_frametime();
+    {   /* (netplay) the frame's input fixed (tt_netplay.c), then the state hashed
+         * at the frame boundary (tt_statehash.c, TT_STATEHASH) */
+        extern void tt_netplay_frame(void);
+        extern void tt_statehash_frame(uint32_t game_ms);
+        tt_netplay_frame();
+        tt_statehash_frame(tt_game_ms);
+    }
     w = MEM32(0x4B8B98u); memcpy(&ms, &w, 4);
     if (tt_real_ms >= 100.0f) { static int lg = -1; if (lg < 0) lg = getenv("TT_LVLLOG") != NULL; if (lg) tt_dbg("  [LVLRESET] at game %u ms, level clock was %u (frame %.0f ms)\n", tt_game_ms, tt_lvl_ms, tt_real_ms); tt_lvl_ms = 0; }
     if (ms >= 1.0f && ms < 100.0f) {
