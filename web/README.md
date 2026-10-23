@@ -29,7 +29,10 @@ Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canv
 the levels run at the game's 30 frames/s. `?RECOMP_RENDERER=software` uses the CPU renderer instead (a few
 frames/s in a level), `?TT_WEB_SIZE=1920x1440` sets the canvas's resolution (default 1280x960).
 
-What works: the menus, the videos, the levels, the keyboard. What doesn't yet: sound (silent), controllers.
+Sound starts on the first click or key (browsers allow nothing sooner): the emulated APU's output goes through a
+ring in the shared memory to an AudioWorklet. Controllers go through the browser's Gamepad API (press a button on
+one so the browser shows it), with rumble where the browser supports it; the game's own device and co-op settings
+apply as on the desktop.
 
 ## Test it
 

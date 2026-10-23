@@ -287,6 +287,91 @@ int xa2_get_buffer_size(void)
  * Recovery, as for XAudio2: a device that stops playing (unplugged, a sound
  * server restart) or a queue that stays full and does not drain for 750 ms
  * reopens the default device, at most once every two seconds. */
+#if defined(__EMSCRIPTEN__)
+/* (web port) The browser: the APU runs in a worker, and the page's Web Audio
+ * lives on its main thread, so SDL's audio cannot be used. The periods go
+ * into a ring in the wasm memory (shared), and an AudioWorklet on the page
+ * reads them from there on the audio thread (web/index.html, ttAudioStart):
+ * one writer (here), one reader (the worklet), positions as atomics.
+ *
+ * Until the page has started its audio (browsers allow that only after a
+ * click or a key), nothing drains the ring: it reads as full, so the APU's
+ * cushion keeps it in real time and the periods past the cap are dropped,
+ * as with a full device queue. Under Node there is no page and no output. */
+#include <stdlib.h>
+#include <string.h>
+#include <emscripten.h>
+
+#define WEB_A_RING   16384u            /* frames, a power of two (341 ms) */
+#define WEB_A_CAP    (16u * 256u)      /* frames queued at most (85 ms), as SDL's queue */
+typedef struct {
+    volatile uint32_t write, read;     /* frames, wrapping; read is the worklet's */
+    volatile uint32_t started;         /* the page's audio is running */
+    uint32_t pad;
+    int16_t data[WEB_A_RING * 2];
+} WebAudioRing;
+static WebAudioRing *g_web_ring;
+static int g_web_frames;
+
+int xa2_init(void)
+{
+    const char *out = getenv("RECOMP_AUDIO_OUT");
+    if (g_web_ring) return 1;
+    if (out && out[0] == '0') { fprintf(stderr, "[AUDIO] audio output disabled (RECOMP_AUDIO_OUT=0)\n"); return 0; }
+    if (!getenv("TT_WEB_CANVAS")) { fprintf(stderr, "[AUDIO] no page to play on (Node): silent\n"); return 0; }
+    g_web_ring = (WebAudioRing *)calloc(1, sizeof *g_web_ring);
+    if (!g_web_ring) return 0;
+    MAIN_THREAD_ASYNC_EM_ASM({
+        if (Module.ttAudioStart) Module.ttAudioStart(HEAPU8.buffer, Number($0), $1);
+    }, (double)(uintptr_t)g_web_ring, (int)WEB_A_RING);
+    fprintf(stderr, "[AUDIO] Web Audio through a shared ring (48000 Hz stereo 16-bit; starts on the first click or key)\n");
+    return 1;
+}
+
+void xa2_shutdown(void)
+{
+    if (g_web_ring) fprintf(stderr, "[AUDIO] Shut down (%d periods written)\n", g_web_frames);
+}
+
+int xa2_is_active(void)
+{
+    return g_web_ring != NULL;
+}
+
+int xa2_submit_samples(const int16_t *samples, int num_samples)
+{
+    uint32_t w, r, i, n;
+    if (!g_web_ring || num_samples <= 0) return 0;
+    if (num_samples > 1024) num_samples = 1024;
+    n = (uint32_t)num_samples;
+    w = __atomic_load_n(&g_web_ring->write, __ATOMIC_RELAXED);
+    r = __atomic_load_n(&g_web_ring->read, __ATOMIC_ACQUIRE);
+    if (!__atomic_load_n(&g_web_ring->started, __ATOMIC_ACQUIRE) || w - r + n > WEB_A_CAP) return 0;
+    for (i = 0; i < n; i++) {
+        uint32_t k = ((w + i) & (WEB_A_RING - 1)) * 2;
+        g_web_ring->data[k] = samples[2 * i];
+        g_web_ring->data[k + 1] = samples[2 * i + 1];
+    }
+    __atomic_store_n(&g_web_ring->write, w + n, __ATOMIC_RELEASE);
+    g_web_frames++;
+    return 1;
+}
+
+int xa2_queued_periods(void)
+{
+    uint32_t q;
+    if (!g_web_ring) return -1;
+    if (!__atomic_load_n(&g_web_ring->started, __ATOMIC_ACQUIRE)) return WEB_A_CAP / 256u;   /* (not draining: full) */
+    q = __atomic_load_n(&g_web_ring->write, __ATOMIC_RELAXED) - __atomic_load_n(&g_web_ring->read, __ATOMIC_ACQUIRE);
+    return (int)(q / 256u);
+}
+
+int xa2_get_buffer_size(void)
+{
+    return 1024;
+}
+
+#else /* SDL2 */
 #include <SDL.h>
 #include <time.h>
 
@@ -428,4 +513,5 @@ int xa2_get_buffer_size(void)
     return SDL_A_BUF;
 }
 
+#endif /* __EMSCRIPTEN__ */
 #endif /* _WIN32 */

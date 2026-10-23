@@ -23,11 +23,12 @@
   <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
   <div id="status">Loading…</div>
   <details>
-    <summary>Keys (click the picture first)</summary>
+    <summary>Keys (click the picture first: that also starts the sound)</summary>
     <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move ·
        <kbd>K</kbd> A (jump) · <kbd>J</kbd> X (fast attack) · <kbd>I</kbd> Y (fierce attack) · <kbd>L</kbd> B (parry) ·
        <kbd>F</kbd>/<kbd>R</kbd> left/right trigger · <kbd>Enter</kbd> Start · <kbd>Backspace</kbd> Back ·
        arrows: d-pad</p>
+    <p>Controllers (Xbox, PlayStation, Switch Pro, …) work too: press a button on one so the browser shows it.</p>
     <p>Settings go in the address: <code>?TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1</code>
        starts in the first level. Any <code>KEY=VALUE</code> becomes one of the game's switches.</p>
   </details>
@@ -42,7 +43,10 @@
   // kept in memory, the panel redrawn a few times a second at most
   const lines = [];
   let logDirty = false;
+  const keyLines = [];   // the lines worth keeping whatever scrolls past (web/tools read them)
+  const KEY = /\[(INPUT|WEB|GL|AUDIO|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
   function log(text) {
+    if (KEY.test(text) && keyLines.length < 2000) keyLines.push(text);
     lines.push(text);
     if (lines.length > 4000) lines.splice(0, 1000);
     if (!logDirty) {
@@ -55,6 +59,7 @@
     }
   }
   self.ttLogLines = lines;   // (for web/tools/browser-check.mjs)
+  self.ttKeyLines = keyLines;
   function status(text, bad) { statusEl.textContent = text; statusEl.className = bad ? 'bad' : ''; }
 
   if (!self.crossOriginIsolated) {
@@ -67,7 +72,7 @@
   const args = {};
   for (const [k, v] of new URLSearchParams(location.search)) args[k] = v;
 
-  let frames = 0, t0 = performance.now(), ended = false;
+  let frames = 0, t0 = performance.now(), ended = false, ready = false;   // ready: the game's exports can be called
   function countFrames(n) {
     frames += n;
     const now = performance.now();
@@ -87,21 +92,114 @@
       countFrames(1);
     },
     ttFrames: countFrames,   // WebGL: frames presented, reported in batches
+    ttAudioStart(buf, ptr, frames) { audio = { buf, ptr, frames }; },   // the game's sound ring (apu_xaudio2.c)
+    onRuntimeInitialized() { ready = true; },
     onAbort(what) { ended = true; status('Stopped: ' + what, true); },
     onExit(code) { ended = true; status(`The game ended (code ${code}). Reload to start again.`, code !== 0); },
   };
   status('Starting… the first frames take a few seconds.');
 
+  // Sound: the game writes 48 kHz stereo 16-bit into a ring in its (shared)
+  // memory -- { write, read, started, pad } as uint32, then the samples -- and
+  // this worklet reads it on the audio thread. Browsers start audio only after
+  // a click or a key, so it starts on the first one.
+  let audio = null, audioCtx = null;
+  const WORKLET = `
+    class TTAudio extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.port.onmessage = (e) => {
+          const { buf, ptr, frames } = e.data;
+          this.idx = new Uint32Array(buf, ptr, 4);
+          this.pcm = new Int16Array(buf, ptr + 16, frames * 2);
+          this.mask = frames - 1;
+          Atomics.store(this.idx, 2, 1);   // started
+        };
+      }
+      process(inputs, outputs) {
+        const L = outputs[0][0], R = outputs[0][1] || L, n = L.length;
+        let m = 0;
+        if (this.idx) {
+          const w = Atomics.load(this.idx, 0), r = Atomics.load(this.idx, 1);
+          m = Math.min((w - r) >>> 0, n);
+          for (let i = 0; i < m; i++) {
+            const k = ((r + i) & this.mask) * 2;
+            L[i] = this.pcm[k] / 32768; R[i] = this.pcm[k + 1] / 32768;
+          }
+          Atomics.store(this.idx, 1, (r + m) >>> 0);
+        }
+        for (let i = m; i < n; i++) { L[i] = 0; R[i] = 0; }
+        return true;
+      }
+    }
+    registerProcessor('tt-audio', TTAudio);`;
+  // (for web/tools: the sound's state, and the loudest sample in the ring)
+  self.ttAudioProbe = () => {
+    if (!audio) return { ring: false };
+    const idx = new Uint32Array(audio.buf, audio.ptr, 4), pcm = new Int16Array(audio.buf, audio.ptr + 16, audio.frames * 2);
+    let peak = 0;
+    for (let i = 0; i < pcm.length; i++) { const v = Math.abs(pcm[i]); if (v > peak) peak = v; }
+    return { ring: true, state: audioCtx?.state ?? 'not started', written: idx[0], read: idx[1], started: idx[2], peak };
+  };
+  async function startAudio() {
+    if (audioCtx || !audio) return;
+    audioCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }));
+    await audioCtx.audioWorklet.addModule(url);
+    const node = new AudioWorkletNode(audioCtx, 'tt-audio', { numberOfInputs: 0, outputChannelCount: [2] });
+    node.port.postMessage({ buf: audio.buf, ptr: audio.ptr, frames: audio.frames });
+    node.connect(audioCtx.destination);
+    await audioCtx.resume();
+  }
+
+  // Controllers: the Gamepad API exists only on this thread, so the pads are
+  // read here every animation frame and handed to the game in XInput's terms
+  // (xinput_device.c, tt_web_pad); the rumble it asks for is played back.
+  // Browsers show a pad only after one of its buttons has been pressed.
+  // The standard mapping: A B X Y, LB RB, LT RT (analog), Back Start, LS RS, d-pad.
+  const XI = [0x1000, 0x2000, 0x4000, 0x8000, 0x0100, 0x0200, 0, 0, 0x0020, 0x0010, 0x0040, 0x0080, 0x0001, 0x0002, 0x0004, 0x0008];
+  const padsSeen = new Set(), rumbleSent = new Map();
+  const axis = (v) => Math.max(-32768, Math.min(32767, Math.round((v || 0) * 32767)));
+  const press = (b) => (b ? (typeof b === 'object' ? b.pressed || b.value > 0.5 : b > 0.5) : false);
+  function pollPads() {
+    requestAnimationFrame(pollPads);
+    if (ended || !ready) return;
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    for (let k = 0; k < 8; k++) {
+      const gp = pads[k];
+      if (!gp || !gp.connected) {
+        if (padsSeen.delete(k)) Module._tt_web_pad(k, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+        continue;
+      }
+      if (!padsSeen.has(k)) { padsSeen.add(k); log(`[WEB] controller ${k + 1}: ${gp.id} (${gp.mapping || 'no standard mapping'})`); }
+      let buttons = 0;
+      for (let i = 0; i < XI.length && i < gp.buttons.length; i++) if (XI[i] && press(gp.buttons[i])) buttons |= XI[i];
+      const trig = (i) => Math.round(Math.max(0, Math.min(1, gp.buttons[i]?.value ?? 0)) * 255);
+      const ps = /054c|dualsense|dualshock|playstation/i.test(gp.id) ? (/dualsense|0ce6|0df2/i.test(gp.id) ? 5 : 4) : 0;
+      Module._tt_web_pad(k, 1, buttons, trig(6), trig(7),
+                         axis(gp.axes[0]), axis(-gp.axes[1]), axis(gp.axes[2]), axis(-gp.axes[3]), ps);
+      // rumble: re-sent while on (an effect runs for a set time)
+      const r = Module._tt_web_pad_rumble(k) >>> 0, last = rumbleSent.get(k) || { r: 0, t: 0 }, now = performance.now();
+      if (gp.vibrationActuator && (r !== last.r || (r && now - last.t > 150))) {
+        gp.vibrationActuator.playEffect('dual-rumble', { duration: r ? 250 : 0,
+          strongMagnitude: (r >>> 16) / 65535, weakMagnitude: (r & 0xffff) / 65535 }).catch(() => {});
+        rumbleSent.set(k, { r, t: now });
+      }
+    }
+  }
+  requestAnimationFrame(pollPads);
+
   // keys to the game (keyCode is the Windows virtual-key code it expects)
   function key(e, down) {
-    if (ended || !Module._tt_web_key) return;
+    startAudio().catch((err) => log('[WEB] sound could not start: ' + err));
+    if (ended || !ready) return;
     Module._tt_web_key(e.keyCode, down ? 1 : 0);
     e.preventDefault();
   }
   canvas.addEventListener('keydown', (e) => key(e, true));
   canvas.addEventListener('keyup', (e) => key(e, false));
-  canvas.addEventListener('blur', () => { if (!ended) for (let vk = 0; vk < 256; vk++) Module._tt_web_key?.(vk, 0); });
-  canvas.addEventListener('click', () => canvas.focus());
+  canvas.addEventListener('blur', () => { if (ready && !ended) for (let vk = 0; vk < 256; vk++) Module._tt_web_key(vk, 0); });
+  canvas.addEventListener('click', () => { canvas.focus(); startAudio().catch((err) => log('[WEB] sound could not start: ' + err)); });
   canvas.focus();
 </script>
 <script src="twotowers_recomp.js"></script>

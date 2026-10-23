@@ -511,6 +511,53 @@ static DWORD WINAPI sp_thread(LPVOID arg)
     return 0;
 }
 
+#if defined(__EMSCRIPTEN__)
+/* (web port) The browser's gamepads exist only on the page's main thread
+ * (the Gamepad API is not in workers), so no SDL thread: the page polls them
+ * every animation frame and hands each one's state over here, in XInput's
+ * terms, into the same table (web/index.html). The rumble asked for is read
+ * back by the page and played on the pad. */
+#include <emscripten.h>
+static void sp_start(void)
+{
+    static volatile LONG started;
+    if (started || InterlockedExchange(&started, 1)) return;
+    InitializeCriticalSection(&s_sp_lock);
+    InterlockedExchange(&s_sp_state, 1);
+}
+EMSCRIPTEN_KEEPALIVE void tt_web_pad(int k, int connected, int buttons, int lt, int rt,
+                                     int lx, int ly, int rx, int ry, int is_ps)
+{
+    HostPad p;
+    if (k < 0 || k >= SP_MAX || s_sp_state <= 0) return;
+    memset(&p, 0, sizeof p);
+    p.buttons = (WORD)buttons;
+    p.lt = (BYTE)lt; p.rt = (BYTE)rt;
+    p.lx = (SHORT)lx; p.ly = (SHORT)ly; p.rx = (SHORT)rx; p.ry = (SHORT)ry;
+    EnterCriticalSection(&s_sp_lock);
+    if (connected && !s_sp[k].gc) {
+        s_sp[k].gc = (SDL_GameController *)(intptr_t)(k + 1);   /* (no SDL object: a token) */
+        s_sp[k].is_ps = is_ps;
+        snprintf(s_sp[k].name, sizeof s_sp[k].name, "%s %d", is_ps ? "PlayStation controller" : "Controller", k + 1);
+        fprintf(stderr, "  [INPUT] controller connected (browser): %s\n", s_sp[k].name);
+    } else if (!connected && s_sp[k].gc) {
+        fprintf(stderr, "  [INPUT] controller unplugged (browser): %s\n", s_sp[k].name);
+        memset(&s_sp[k], 0, sizeof s_sp[k]);
+    }
+    if (connected) {
+        p.packet = memcmp(&p, &s_sp[k].st, sizeof p - sizeof p.packet) ? s_sp[k].st.packet + 1 : s_sp[k].st.packet;
+        s_sp[k].st = p;
+        s_sp[k].connected = 1;
+    }
+    LeaveCriticalSection(&s_sp_lock);
+}
+/* the motors the game wants on pad k: left << 16 | right (0-65535 each) */
+EMSCRIPTEN_KEEPALIVE int tt_web_pad_rumble(int k)
+{
+    if (k < 0 || k >= SP_MAX || !s_sp[k].gc) return 0;
+    return (int)(((uint32_t)s_sp[k].want_l << 16) | s_sp[k].want_r);
+}
+#else
 static void sp_start(void)
 {
     static volatile LONG started;
@@ -522,6 +569,7 @@ static void sp_start(void)
     if (h) CloseHandle(h);
     else InterlockedExchange(&s_sp_state, -1);
 }
+#endif
 #else
 void xbox_SDLInitLock(int lock) { (void)lock; }
 static void sp_start(void) {}
