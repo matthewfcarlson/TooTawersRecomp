@@ -428,7 +428,8 @@ static void twotowers_setup_paths_and_log(void)
     }
     if (GetPrivateProfileIntA("Developer", "profile", 0, g_ini_path) && !getenv("RECOMP_PROFILE"))
         _putenv_s("RECOMP_PROFILE", "all");
-    if (GetPrivateProfileIntA("Developer", "logging", 1, g_ini_path)) {
+    if (GetPrivateProfileIntA("Developer", "logging", 1, g_ini_path)
+            && !getenv("TT_WEB_CANVAS")) {   /* (web port) the page shows the log instead */
         char log_path[MAX_PATH];
         FILE *sink;
         snprintf(log_path, sizeof(log_path), "%s" TT_SEP "twotowers_log.txt", g_exe_dir);

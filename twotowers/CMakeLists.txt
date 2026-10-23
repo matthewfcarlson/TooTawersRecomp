@@ -181,6 +181,22 @@ else()
     endif()
 endif()
 
+# (web port) WebAssembly (memory64) through Emscripten: see ../web/README.md.
+# One build runs under Node (tests) and in the browser.
+if(EMSCRIPTEN)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_platform.c)
+    target_link_options(${PROJECT_NAME} PRIVATE
+        -sMEMORY64=1 -pthread -sWASMFS=1
+        -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=24
+        -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=8GB
+        -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=8MB
+        -sENVIRONMENT=web,worker,node -sEXIT_RUNTIME=1
+        "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stringToNewUTF8"
+        "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/../web/opfs_fix.js"
+        -sASSERTIONS=1 --profiling-funcs)
+    set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".js")
+endif()
+
 # MSVC-specific: large address aware, increase section limit for big generated files
 if(MSVC)
     target_link_options(${PROJECT_NAME} PRIVATE

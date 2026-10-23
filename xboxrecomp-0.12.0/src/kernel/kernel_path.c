@@ -621,6 +621,12 @@ void xbox_path_init(const char* game_dir, const char* save_dir)
             if (stat(p, &st) != 0 || (unsigned long long)st.st_size != part_sectors[i] * 512ull) {
                 FILE *f = fopen(p, "ab");
                 if (f) fclose(f);
+#if defined(__EMSCRIPTEN__)
+                /* (web port) with the home in memory (no OPFS) files are not
+                 * sparse: 5.8 GB of raw partitions would be allocated
+                 * outright. Left empty; saves go through the folders above. */
+                if (getenv("TT_WEB_NO_SPARSE")) continue;
+#endif
                 if (truncate(p, (off_t)(part_sectors[i] * 512ull)) != 0) { /* not fatal */ }
             }
         }

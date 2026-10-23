@@ -29,7 +29,12 @@
  */
 
 #include <math.h>
+#if defined(__EMSCRIPTEN__)   /* (web port) no cycle counter: the clock in ns stands in for [PERFRT] */
+#include <emscripten.h>
+static inline unsigned long long __rdtsc(void) { return (unsigned long long)(emscripten_get_now() * 1e6); }
+#else
 #include <x86intrin.h>
+#endif
 
 /* (1.9.5) Where the render thread's time goes, for the log's [PERFRT] line:
  * processor cycles (rdtsc, a few ns a reading) per phase of a draw. */

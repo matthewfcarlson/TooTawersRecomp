@@ -1,0 +1,9 @@
+{
+  "name": "twotowers-web-tools",
+  "private": true,
+  "description": "(web port) test tools for the browser build",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "1.64.1"
+  }
+}

@@ -1,0 +1,39 @@
+# The Two Towers in the browser (work in progress)
+
+The port's game code compiled to WebAssembly (memory64, threads) with Emscripten. Plan and status: `../WEB_PORT.md`.
+
+## Build
+
+Needs Emscripten (`emcc`), CMake and Ninja, and the generated game code (`python generate.py <your disc>`).
+
+```sh
+web/build.sh          # -> build-web/twotowers_recomp.js + .wasm (the first build takes a few minutes)
+```
+
+## Play it locally
+
+```sh
+node web/serve.mjs    # http://localhost:8080/ ; --port, --disc <extracted disc folder> (default isos/extracted)
+```
+
+Open the address in **Chrome or Firefox** (Safari has no memory64), click the picture, and play with the keyboard:
+W A S D move, K jump, J / I attacks, L parry, Enter Start, Backspace Back. The page shows the game's log underneath.
+
+Any `KEY=VALUE` in the address's query is one of the game's switches, for example
+`?TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1` to start in the first level.
+
+The server only listens on 127.0.0.1 and serves your disc to your own browser; it sends the cross-origin isolation
+headers threads need. Saves and settings stay in the browser's private storage for the page (OPFS).
+
+What works: the menus, the videos, the levels, the keyboard. What doesn't yet: sound (silent), controllers, speed
+(software rendering: about 30 frames/s in the menus, a few in a level).
+
+## Test it
+
+```sh
+node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same build under Node, no window; frames to BMP
+node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
+```
+
+`browser-check.mjs` needs `npm install` in `web/tools` (playwright-core) and a Chromium from Playwright's cache
+(`npx playwright install chromium`).

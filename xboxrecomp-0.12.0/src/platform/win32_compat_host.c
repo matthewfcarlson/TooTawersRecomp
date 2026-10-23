@@ -285,6 +285,14 @@ DWORD GetModuleFileNameA(HMODULE m, LPSTR out, DWORD size)
     ssize_t n;
     (void)m;
     if (!out || !size) return 0;
+#if defined(__EMSCRIPTEN__)
+    /* (web port) a program file the ini, log and saves sit beside: in
+     * TT_WEB_HOME (the game's web start-up sets it) */
+    {
+        const char *h = getenv("TT_WEB_HOME");
+        return (DWORD)snprintf(out, size, "%s/twotowers_recomp", h ? h : "/home/web_user");
+    }
+#endif
 #if defined(__APPLE__)
     {
         extern int _NSGetExecutablePath(char *buf, uint32_t *bufsize);

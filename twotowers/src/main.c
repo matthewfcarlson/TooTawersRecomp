@@ -1078,6 +1078,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     /* Step 2: Initialize Xbox memory layout */
     printf("Initializing Xbox memory layout...\n");
+    {   /* (web port) the generated code completes AC'97 resets itself
+         * (postproc_ac97.py, which defines this): no write trap */
+        extern const int g_ac97_writes_routed;
+        if (g_ac97_writes_routed) xbox_Ac97RouteWrites();
+    }
     if (!xbox_MemoryLayoutInit(xbe_data, xbe_size)) {
         MessageBoxA(NULL, "Failed to initialize Xbox memory layout.\n"
                     "The required virtual address range may be unavailable.",
@@ -1235,6 +1240,11 @@ static BOOL load_xbe(const char *path, void **out_data, size_t *out_size)
 static void *tt_main_thread(void *p)
 {
     (void)p;
+#if defined(__APPLE__)
+    /* (web port) the main thread may be inside the frame loop, which never
+     * returns: the game ending ends the process from here */
+    exit(WinMain(NULL, NULL, (LPSTR)"", 0));
+#endif
     return (void *)(intptr_t)WinMain(NULL, NULL, (LPSTR)"", 0);
 }
 #endif
@@ -1243,6 +1253,12 @@ int main(int argc, char **argv)
 {
     (void)argc;
     (void)argv;
+#if defined(__EMSCRIPTEN__)
+    {   /* (web port) settings from the arguments, the file system (web/web_platform.c) */
+        extern void tt_web_init(int argc, char **argv);
+        tt_web_init(argc, argv);
+    }
+#endif
 #if defined(_WIN32)
     return WinMain(GetModuleHandle(NULL), NULL, GetCommandLineA(), SW_SHOW);
 #else
@@ -1257,6 +1273,12 @@ int main(int argc, char **argv)
         pthread_attr_init(&at);
         pthread_attr_setstacksize(&at, 64u << 20);
         if (pthread_create(&th, &at, tt_main_thread, NULL) == 0) {
+#if defined(__APPLE__)
+            {   /* (web port) the window's frame loop runs on this thread (fb_present.c) */
+                extern void xbox_MainThreadServe(void);
+                xbox_MainThreadServe();
+            }
+#endif
             pthread_join(th, &rv);
             return (int)(intptr_t)rv;
         }

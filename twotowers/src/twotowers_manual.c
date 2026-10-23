@@ -3404,7 +3404,7 @@ void sub_001697D9(void)
         tt_coop_input_sync(); eax = sa; ecx = sc; edx = sd; esp = sp; }
     if (h == 0xFEED0000u) {   /* (bot test, TT_COOP_P1PORT) player 1's idle pad on port 0: a pad at rest */
         uint32_t i; static uint32_t packet; MEM32(st) = ++packet; for (i = 4; i < 0x16; i += 2) MEM16(st + i) = 0;
-        { extern void (*volatile xbox_pad_filter)(unsigned long port, void *st); if (xbox_pad_filter) xbox_pad_filter(0, (void *)XBOX_PTR(st)); }   /* (TT_P1SCRIPT_INPLAY scripts it) */
+        { extern void (*volatile xbox_pad_filter)(tt_dword port, void *st); if (xbox_pad_filter) xbox_pad_filter(0, (void *)XBOX_PTR(st)); }   /* (TT_P1SCRIPT_INPLAY scripts it) */
         coop_p1pad_ry = (int16_t)MEM16(st + 0x14); coop_p1pad_lt = MEM8(st + 6 + 6);
         eax = 0; esp += 12; return;
     }

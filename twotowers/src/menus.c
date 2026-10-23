@@ -949,7 +949,7 @@ static int mouse_log(void) { static int on = -1; if (on < 0) on = getenv("TT_MOU
 /* ---- the controller, as the game is about to see it ---- */
 typedef struct { uint16_t wButtons; uint8_t bAnalogButtons[8]; int16_t sThumbLX, sThumbLY, sThumbRX, sThumbRY; } XPad;
 typedef struct { uint32_t dwPacketNumber; XPad Gamepad; } XState;
-extern void (*volatile xbox_pad_filter)(unsigned long port, XState *st);
+extern void (*volatile xbox_pad_filter)(DWORD port, XState *st);   /* (web port: DWORD, as declared; unsigned long is 64-bit off Windows) */
 /* bot test (TT_P1SCRIPT=file): player 1's pad driven by a script, lines "<from ms> <to ms> <button>" from the launch
  * (A, B, X, Y, START, BACK, UP, DOWN, LEFT, RIGHT), for the menus (co-op's TT_COOP_PAD2SCRIPT drives player 2's) */
 static void p1_script(XState *st)
@@ -993,7 +993,7 @@ static void p1_script(XState *st)
         st->dwPacketNumber += 0x100000u * (i + 1);   /* (the game sees a change) */
     }
 }
-static void pad_filter(unsigned long port, XState *st)
+static void pad_filter(DWORD port, XState *st)
 {
     uint32_t prim = G32(0x1CB8B4u), inj = s_inj;
     if (getenv("TT_P1SCRIPT_INPLAY") && (G32(0x4AD050u) == 6 || G32(0x4AD050u) == 8)) { static int n; if (n++ < 6) tt_dbg("[P1SCRIPT] in play: pad port %lu, primary %u\n", port, prim); }

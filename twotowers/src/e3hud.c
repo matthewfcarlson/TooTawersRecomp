@@ -46,7 +46,7 @@ typedef struct { uint16_t wButtons; uint8_t bAnalogButtons[8]; int16_t sThumbLX,
 typedef struct { uint32_t dwPacketNumber; XPad Gamepad; } XState;
 
 extern int (*volatile xbox_overlay_cb)(XboxOverlayQuad *q, int max);
-extern void (*volatile xbox_pad_observer)(unsigned long port, const XState *st);
+extern void (*volatile xbox_pad_observer)(DWORD port, const XState *st);   /* (web port: DWORD, as declared; unsigned long is 64-bit off Windows) */
 extern void (*volatile xbox_tex_observer)(uint32_t hash, uint32_t *argb, int w, int h);
 extern volatile long xbox_tex_rev;
 extern int xbox_FrameUsedTexture(uint32_t hash);
@@ -95,7 +95,7 @@ static void combo_end(void)
     s_state_ver++;
 }
 
-static void e3_pad(unsigned long port, const XState *st)
+static void e3_pad(DWORD port, const XState *st)
 {
     static uint8_t prevs[4][8];
     static const int map[3][2] = { { 0, R_SPEED }, { 3, R_FIERCE }, { 1, R_SPECIAL } };   /* A, Y, B */

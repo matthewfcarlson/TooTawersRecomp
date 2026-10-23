@@ -74,11 +74,26 @@ static inline void qemu_cond_timedwait(QemuCond *c, QemuMutex *m, int ms) {
 typedef void *(*QemuThreadFunc)(void *arg);
 
 #ifndef qemu_thread_create
+/* (web port) through an adapter rather than a cast: a void *(void *) called as
+ * DWORD (LPVOID) traps in WebAssembly ("function signature mismatch") */
+typedef struct { void *(*func)(void *); void *arg; } QemuThreadStart;
+static DWORD WINAPI qemu_thread_start(LPVOID p) {
+    QemuThreadStart s = *(QemuThreadStart *)p;
+    free(p);
+    s.func(s.arg);
+    return 0;
+}
 static inline void qemu_thread_create(QemuThread *t, const char *name,
                                        void *(*func)(void *), void *arg,
                                        int mode) {
+    QemuThreadStart *s = (QemuThreadStart *)malloc(sizeof *s);
     (void)name; (void)mode;
-    t->thread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)func, arg, 0, NULL);
+    t->thread = NULL;
+    if (!s) return;
+    s->func = func;
+    s->arg = arg;
+    t->thread = CreateThread(NULL, 0, qemu_thread_start, s, 0, NULL);
+    if (!t->thread) free(s);
 }
 #endif
 

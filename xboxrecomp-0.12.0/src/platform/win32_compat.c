@@ -38,7 +38,7 @@ size_t view_take(const void *addr);
 #include <sys/stat.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
-#else
+#elif !defined(__EMSCRIPTEN__)
 #include <sys/sysinfo.h>
 #endif
 
@@ -1201,6 +1201,7 @@ static void *mach_map_fixed(void *address, size_t size, int prot)
  * rather than leaving a hole for something else to land in. Inside the
  * arena an address already in use still refuses a second mapping, as
  * Windows does. */
+#if !defined(__EMSCRIPTEN__)
 static uintptr_t s_arena_lo, s_arena_hi;
 static uint8_t *s_arena_used;          /* one byte per 4 KB page */
 static pthread_mutex_t s_arena_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -1336,6 +1337,10 @@ BOOL VirtualProtect(LPVOID address, SIZE_T size, DWORD newProtect, PDWORD oldPro
     if (oldProtect) *oldProtect = PAGE_READWRITE;
     return mprotect(address, size, prot_from_page(newProtect)) == 0;
 }
+
+#else /* (web port) */
+#include "win32_compat_wasm_mem.inc"
+#endif
 
 /* ===================================================================== */
 /* Time                                                                  */
@@ -1748,11 +1753,15 @@ static int anon_map_fd(const char *name)
     int fd = shm_open(shm_name, O_CREAT | O_RDWR | O_EXCL, 0600);
     if (fd >= 0) shm_unlink(shm_name);
     return fd;
+#elif defined(__EMSCRIPTEN__)   /* (web port) mappings are plain memory */
+    (void)name;
+    return -1;
 #else
     return memfd_create(name ? name : "xbox_map", 0);
 #endif
 }
 
+#if !defined(__EMSCRIPTEN__)   /* (web port: win32_compat_wasm_mem.inc) */
 HANDLE CreateFileMappingA(HANDLE file, LPSECURITY_ATTRIBUTES sa, DWORD protect,
                           DWORD maxSizeHigh, DWORD maxSizeLow, LPCSTR name)
 {
@@ -1849,6 +1858,8 @@ BOOL UnmapViewOfFile(LPCVOID baseAddr)
     return munmap((void *)baseAddr, len) == 0;
 }
 
+#endif
+
 /* ===================================================================== */
 /* VirtualQuery                                                           */
 /* ===================================================================== */
@@ -1934,6 +1945,12 @@ BOOL GlobalMemoryStatusEx(LPMEMORYSTATUSEX b)
     b->ullAvailPhys     = avail;
     b->ullTotalPageFile = b->ullTotalPhys + (ULONGLONG)swap.xsu_total;
     b->ullAvailPageFile = b->ullAvailPhys + (ULONGLONG)swap.xsu_avail;
+#elif defined(__EMSCRIPTEN__)
+    /* (web port) the browser does not say: a console's worth and more */
+    b->ullTotalPhys     = 2ull << 30;
+    b->ullAvailPhys     = 1ull << 30;
+    b->ullTotalPageFile = b->ullTotalPhys;
+    b->ullAvailPageFile = b->ullAvailPhys;
 #else
     struct sysinfo si;
     if (sysinfo(&si) != 0) return FALSE;
@@ -2307,8 +2324,8 @@ BOOL SetThreadStackGuarantee(PULONG size) { (void)size; return TRUE; }
 /* The process's CPUs as they were at start-up: Linux has only per-thread
  * masks, and the thread asking may have been pinned to one core since (the
  * single-CPU mode pins the game's threads; Windows' process mask stays). */
-#if defined(__APPLE__)
-/* macOS: no affinity masks; every CPU the system has */
+#if defined(__APPLE__) || defined(__EMSCRIPTEN__)
+/* macOS (and the web port): no affinity masks; every CPU the system has */
 BOOL GetProcessAffinityMask(HANDLE process, DWORD_PTR *procMask, DWORD_PTR *sysMask)
 {
     long n = sysconf(_SC_NPROCESSORS_ONLN);
@@ -2347,7 +2364,7 @@ BOOL GetProcessAffinityMask(HANDLE process, DWORD_PTR *procMask, DWORD_PTR *sysM
 #endif
 DWORD_PTR SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
 {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__EMSCRIPTEN__)
     /* macOS has no thread affinity (only hints): the mask is accepted */
     (void)thread; (void)mask;
     return 1;
@@ -2368,6 +2385,11 @@ DWORD_PTR SetThreadAffinityMask(HANDLE thread, DWORD_PTR mask)
     if (pthread_setaffinity_np(pthread_self(), sizeof cs, &cs) != 0) return 0;
     return old ? old : 1;
 }
+#endif
+#if defined(__EMSCRIPTEN__)
+/* (web port) no write watches (no page protection) and no native backtrace */
+void xbox_WatchArm(void *host_word) { (void)host_word; }
+int backtrace(void **buf, int n) { (void)buf; (void)n; return 0; }
 #endif
 #include <dlfcn.h>
 HMODULE GetModuleHandleA(LPCSTR name)

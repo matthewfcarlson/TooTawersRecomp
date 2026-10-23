@@ -395,6 +395,18 @@ static LONG CALLBACK ac97_write_veh(PEXCEPTION_POINTERS ep)
     return EXCEPTION_CONTINUE_SEARCH;
 }
 
+/* (web port) Writes routed instead of trapped: the title's generated code
+ * calls xbox_Ac97WriteDone after each write to the AC'97 block (the game's
+ * postproc_ac97.py), so the reset completes with no fault -- which a browser
+ * cannot take, and which Rosetta 2 reports as a breakpoint. */
+static int s_ac97_routed;
+void xbox_Ac97RouteWrites(void) { s_ac97_routed = 1; }
+void xbox_Ac97WriteDone(void)
+{
+    if (g_ac97_page)
+        ac97_clear_reset_bits();
+}
+
 /* Arm the trap. Called once the MCPX aperture exists, and only alongside the
  * rest of RECOMP_AC97_READY: a title that never gets as far as resetting a
  * channel has nothing to gain from it, and the page fault costs something. */
@@ -405,6 +417,12 @@ static void ac97_arm_write_trap(void)
     if (!g_mcpx_memory || g_ac97_page)
         return;
     g_ac97_page = (char *)g_mcpx_memory + AC97_NABM_OFFSET;
+    if (s_ac97_routed) {
+        fprintf(stderr, "  AC97: bus-master writes routed at 0x%08X"
+                        " (channel reset completes on write, no trap)\n",
+                XBOX_MCPX_BASE + AC97_NABM_OFFSET);
+        return;
+    }
     /* First, so it runs before the game target's own crash reporter, which
      * would otherwise print the write as an access violation. */
     g_ac97_veh = AddVectoredExceptionHandler(1, ac97_write_veh);

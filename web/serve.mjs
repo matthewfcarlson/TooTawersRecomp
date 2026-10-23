@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+// (web port) Development server for the browser build.
+//
+//   node web/serve.mjs [--port 8080] [--build build-web] [--disc isos/extracted]
+//
+// Serves the page (web/index.html), the build (twotowers_recomp.js/.wasm) and
+// your extracted disc under disc/, with disc-manifest.json listing its files
+// ("<size> <path>" per line) for the game's file system. Sends the
+// cross-origin isolation headers threads need (SharedArrayBuffer), and
+// answers HTTP Range requests so the game fetches the disc in chunks as it
+// reads. Listens on 127.0.0.1 only: the disc is yours, not for the network.
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+let port = 8080, build = path.join(repo, 'build-web'), disc = path.join(repo, 'isos', 'extracted');
+const argv = process.argv.slice(2);
+for (let i = 0; i < argv.length; i++) {
+  if (argv[i] === '--port') port = Number(argv[++i]);
+  else if (argv[i] === '--build') build = path.resolve(argv[++i]);
+  else if (argv[i] === '--disc') disc = path.resolve(argv[++i]);
+}
+
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.wasm': 'application/wasm', '.json': 'application/json', '.css': 'text/css' };
+
+function manifest() {
+  const out = [];
+  const walk = (dir, rel) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name), r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(p, r);
+      else if (e.isFile()) out.push(`${fs.statSync(p).size} ${r}`);
+    }
+  };
+  walk(disc, '');
+  // (saves: the game's own UDATA/TDATA, written beside the disc by the desktop build; the page keeps its own)
+  return out.filter((l) => !/^\d+ (UDATA|TDATA)\//i.test(l)).join('\n') + '\n';
+}
+
+function send(res, status, headers, body) {
+  res.writeHead(status, {
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Embedder-Policy': 'require-corp',
+    'Cross-Origin-Resource-Policy': 'same-origin',
+    'Cache-Control': 'no-store',
+    ...headers,
+  });
+  res.end(body);
+}
+
+function sendFile(req, res, file) {
+  let st;
+  try { st = fs.statSync(file); } catch { return send(res, 404, {}, 'not found'); }
+  if (!st.isFile()) return send(res, 404, {}, 'not found');
+  const type = TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream';
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  let start = 0, end = st.size - 1, status = 200;
+  if (range && (range[1] || range[2])) {
+    start = range[1] ? Number(range[1]) : Math.max(0, st.size - Number(range[2]));
+    end = range[1] && range[2] ? Math.min(Number(range[2]), st.size - 1) : st.size - 1;
+    if (start > end || start >= st.size) return send(res, 416, { 'Content-Range': `bytes */${st.size}` }, '');
+    status = 206;
+  }
+  const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': String(end - start + 1) };
+  if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${st.size}`;
+  if (req.method === 'HEAD') return send(res, status, headers, '');
+  res.writeHead(status, {
+    'Cross-Origin-Opener-Policy': 'same-origin', 'Cross-Origin-Embedder-Policy': 'require-corp',
+    'Cross-Origin-Resource-Policy': 'same-origin', 'Cache-Control': 'no-store', ...headers,
+  });
+  fs.createReadStream(file, { start, end }).pipe(res);
+}
+
+// a path under root, or null if it climbs out
+function under(root, rel) {
+  const p = path.resolve(root, '.' + path.posix.normalize('/' + rel));
+  return p === root || p.startsWith(root + path.sep) ? p : null;
+}
+
+// the disc's own spelling of a path (the game asks in lower case)
+function icase(p) {
+  if (!p || fs.existsSync(p)) return p;
+  let cur = disc;
+  for (const part of path.relative(disc, p).split(path.sep)) {
+    let names;
+    try { names = fs.readdirSync(cur); } catch { return p; }
+    const hit = names.find((n) => n.toLowerCase() === part.toLowerCase());
+    if (!hit) return p;
+    cur = path.join(cur, hit);
+  }
+  return cur;
+}
+
+http.createServer((req, res) => {
+  res.on('finish', () => { if (res.statusCode >= 400) console.log(`${res.statusCode} ${req.method} ${req.url}`); });
+  const url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
+  if (url === '/' || url === '/index.html') return sendFile(req, res, path.join(repo, 'web', 'index.html'));
+  if (url === '/disc-manifest.json') return send(res, 200, { 'Content-Type': 'text/plain' }, manifest());
+  if (url.startsWith('/disc/')) {
+    const f = icase(under(disc, url.slice('/disc/'.length)));
+    return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
+  }
+  const f = under(build, url.slice(1));
+  return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
+}).listen(port, '127.0.0.1', () => {
+  console.log(`The Two Towers (web): http://localhost:${port}/`);
+  console.log(`  build ${build}\n  disc  ${disc}`);
+});

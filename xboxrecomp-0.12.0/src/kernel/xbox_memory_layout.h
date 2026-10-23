@@ -452,6 +452,12 @@ extern RECOMP_TLS uint32_t g_fs_base;
  */
 uint32_t xbox_HeapAlloc(uint32_t size, uint32_t alignment);
 
+/* (web port) AC'97 channel resets completed by the title's code, which calls
+ * xbox_Ac97WriteDone after each AC'97 write, rather than by a write trap.
+ * Call xbox_Ac97RouteWrites before xbox_MemoryLayoutInit. */
+void xbox_Ac97RouteWrites(void);
+void xbox_Ac97WriteDone(void);
+
 /**
  * Free a block from the Xbox heap. Currently a no-op (bump allocator).
  */

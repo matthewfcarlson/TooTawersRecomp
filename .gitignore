@@ -42,3 +42,12 @@ e3hud/
 
 # The co-op bot tests' local paths (tools/coop-bot/config.example.ps1 is the template)
 tools/coop-bot/config.ps1
+
+# Local: the disc and its unpacked files, reverse-engineering workspace (Ghidra project), macOS metadata.
+# No trailing slash, so symlinks to them are ignored too.
+/isos
+/re
+.DS_Store
+
+# (web port) the browser test tools' packages
+/web/tools/node_modules/

@@ -1063,6 +1063,58 @@ int xbox_FramebufferDumpBmp(const char *path)
     return 0;
 }
 
+/* (web port) A frame straight from guest memory to a BMP, for a run with no
+ * window (TT_WEB_HEADLESS): the flip calls it when a dump is asked for and
+ * the software renderer drew the frame. */
+int xbox_FramebufferDumpGuest(const char *path, uint32_t fb_va, uint32_t pitch)
+{
+    uint32_t *keep = s_rgb;
+    int r;
+    if (!fb_va || !pitch) return -1;
+    s_rgb = (uint32_t *)calloc((size_t)s_fb_width * s_fb_height, 4);
+    if (!s_rgb) { s_rgb = keep; return -1; }
+    fb_convert_to(s_rgb, (const uint8_t *)((uintptr_t)fb_va + xbox_GetMemoryOffset()), pitch);
+    r = xbox_FramebufferDumpBmp(path);
+    free(s_rgb);
+    s_rgb = keep;
+    return r;
+}
+
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+/* (web port) The browser page, with no SDL window: keys from the page's key
+ * events (keyCode is the Windows virtual-key code), and each flipped frame
+ * drawn onto the page's canvas. */
+EMSCRIPTEN_KEEPALIVE void tt_web_key(int vk, int down)
+{
+    if ((unsigned)vk <= 255) s_key_down[vk] = down ? 1 : 0;
+}
+
+static uint32_t *s_canvas_rgba[2];
+static volatile int s_canvas_busy;   /* the page has not drawn the last frame yet */
+void xbox_FramebufferPresentCanvas(uint32_t fb_va, uint32_t pitch)
+{
+    static int idx;
+    size_t i, n = (size_t)s_fb_width * s_fb_height;
+    uint32_t *d;
+    if (!fb_va || !pitch || s_canvas_busy) return;   /* (the page is behind: drop this one) */
+    idx ^= 1;
+    if (!s_canvas_rgba[idx] && !(s_canvas_rgba[idx] = (uint32_t *)malloc(n * 4))) return;
+    d = s_canvas_rgba[idx];
+    fb_convert_to(d, (const uint8_t *)((uintptr_t)fb_va + xbox_GetMemoryOffset()), pitch);
+    for (i = 0; i < n; i++) {   /* 0x00RRGGBB -> bytes R, G, B, 255 */
+        uint32_t v = d[i];
+        d[i] = 0xFF000000u | ((v & 0xFFu) << 16) | (v & 0xFF00u) | ((v >> 16) & 0xFFu);
+    }
+    s_canvas_busy = 1;
+    MAIN_THREAD_ASYNC_EM_ASM({
+        var p = Number($0); var w = $1; var h = $2; var busy = Number($3);
+        if (Module.ttDrawFrame) Module.ttDrawFrame(HEAPU8.slice(p, p + w * h * 4), w, h);
+        HEAP32[busy >> 2] = 0;
+    }, (double)(uintptr_t)d, (int)s_fb_width, (int)s_fb_height, (double)(uintptr_t)&s_canvas_busy);
+}
+#endif
+
 static void fb_closed(const char *why)
 {
     extern void xbox_InputStopRumble(void);
@@ -1319,6 +1371,24 @@ sdl_failed:
     return 0;
 }
 
+#if defined(__APPLE__)
+/* (web port) AppKit creates windows and menus only on the main thread (SDL's
+ * video init aborted with an NSInternalInconsistencyException from the frame
+ * thread). The game runs on its own thread already (main.c), so the main
+ * thread waits here and runs the frame loop when the window is asked for. */
+#include <pthread.h>
+static pthread_mutex_t s_main_mx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t s_main_cv = PTHREAD_COND_INITIALIZER;
+static int s_main_req;
+void xbox_MainThreadServe(void)
+{
+    pthread_mutex_lock(&s_main_mx);
+    while (!s_main_req) pthread_cond_wait(&s_main_cv, &s_main_mx);
+    pthread_mutex_unlock(&s_main_mx);
+    fb_thread(NULL);
+}
+#endif
+
 void xbox_FramebufferWindowStart(void)
 {
     HANDLE th;
@@ -1326,7 +1396,22 @@ void xbox_FramebufferWindowStart(void)
         InterlockedExchange(&s_gl_state, -1);
         return;
     }
+#if defined(__EMSCRIPTEN__)
+    /* (web port) under Node: no window to open (web/web_platform.c sets it) */
+    if (getenv("TT_WEB_HEADLESS")) {
+        InterlockedExchange(&s_gl_state, -1);
+        return;
+    }
+#endif
     if (InterlockedCompareExchange(&s_fb_running, 1, 0) != 0) return;
+#if defined(__APPLE__)
+    (void)th;
+    pthread_mutex_lock(&s_main_mx);
+    s_main_req = 1;
+    pthread_cond_signal(&s_main_cv);
+    pthread_mutex_unlock(&s_main_mx);
+    return;
+#endif
     th = CreateThread(NULL, 0, fb_thread, NULL, 0, NULL);
     if (th) CloseHandle(th);
     else { InterlockedExchange(&s_fb_running, 0); InterlockedExchange(&s_gl_state, -1); }

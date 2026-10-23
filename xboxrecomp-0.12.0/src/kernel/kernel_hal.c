@@ -1202,6 +1202,21 @@ uint64_t xbox_ReadTimeStampCounter(void)
          * first, then the remainder. */
         uint64_t secs = ticks / (uint64_t)freq.QuadPart;
         uint64_t rem  = ticks % (uint64_t)freq.QuadPart;
+#if defined(__EMSCRIPTEN__)
+        {   /* (web port) a browser's clock is coarse (Firefox: 20 us or
+             * more), so two reads could be equal, which a cycle counter never
+             * is -- and the game divides by the difference (an integer divide
+             * by zero in the CRT's 64-bit division, called from 0x000E6540).
+             * Each read is at least one cycle past the last, on any thread. */
+            static volatile uint64_t last;
+            uint64_t t = secs * XBOX_TSC_HZ + (rem * XBOX_TSC_HZ) / (uint64_t)freq.QuadPart;
+            uint64_t prev = __atomic_load_n(&last, __ATOMIC_RELAXED);
+            do {
+                if (t <= prev) t = prev + 1;
+            } while (!__atomic_compare_exchange_n(&last, &prev, t, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED));
+            return t;
+        }
+#endif
         return secs * XBOX_TSC_HZ
              + (rem * XBOX_TSC_HZ) / (uint64_t)freq.QuadPart;
     }

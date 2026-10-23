@@ -2654,6 +2654,19 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
                                                : s_gpu.color_offset;
             if (done) {
                 if (gpu_on()) gpu_present(dma_resolve(done), s_gpu.pitch & 0xFFFF);
+#if defined(__EMSCRIPTEN__)
+                else if (g_dump_req[0]) {   /* (web port) a frame dump with no GPU renderer: from guest memory */
+                    extern int xbox_FramebufferDumpGuest(const char *path, uint32_t fb_va, uint32_t pitch);
+                    char nm[260];
+                    memcpy(nm, (const char *)g_dump_req, sizeof nm);
+                    g_dump_req[0] = 0;
+                    xbox_FramebufferDumpGuest(nm, dma_resolve(done), s_gpu.pitch & 0xFFFF);
+                }
+                if (!gpu_on() && getenv("TT_WEB_CANVAS")) {   /* (web port) the page's canvas */
+                    extern void xbox_FramebufferPresentCanvas(uint32_t fb_va, uint32_t pitch);
+                    xbox_FramebufferPresentCanvas(dma_resolve(done), s_gpu.pitch & 0xFFFF);
+                }
+#endif
                 xbox_FramebufferWindowSet(dma_resolve(done), s_gpu.pitch);
                 xbox_FramebufferWindowPresent(dma_resolve(done), s_gpu.pitch);
             }
