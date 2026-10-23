@@ -1,5 +1,6 @@
-// (web port) Online co-op's server: signalling and a fallback relay for two
-// players, on Cloudflare (NETPLAY.md). It carries no game data of its own.
+// (web port) The hosted game's Worker: the site's files (static assets,
+// public/ from web/site.mjs: the page and the build, no game data) and online
+// co-op's signalling and fallback relay for two players (NETPLAY.md).
 //
 //   GET  /match/<code>   WebSocket: the match's Durable Object (one per code)
 //   POST /turn           ICE servers for the RTCPeerConnection: Cloudflare's
@@ -38,7 +39,9 @@ export default {
 
     if (url.pathname === "/turn" && request.method === "POST") return iceServers(env);
 
-    return new Response("The Two Towers netplay server", { headers: CORS });
+    // (the site's files are answered before this, web/site.mjs; anything else is not here -- the page asks for
+    // disc-manifest.json to learn whether a server holds the disc, and on the hosted site none does)
+    return new Response("not found", { status: 404, headers: CORS });
   },
 };
 

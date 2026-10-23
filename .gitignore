@@ -58,3 +58,4 @@ tools/coop-bot/config.ps1
 /web/netplay-server/node_modules/
 /web/netplay-server/.wrangler/
 /web/netplay-server/.dev.vars
+/web/netplay-server/public/

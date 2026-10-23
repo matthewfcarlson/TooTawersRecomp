@@ -16,6 +16,11 @@ import path from 'node:path';
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let port = 8080, build = path.join(repo, 'build-web'), disc = path.join(repo, 'isos', 'extracted');
 // the Ultra textures: a folder with GLOS69/ (the pack) and textures_ultra/ (built by twotowers-setup ultra)
+// the co-op bot suite's pad scripts (tools/coop-bot/*.txt), at /bot in the game's files (web/tools/coop-suite.mjs)
+const bot = path.join(repo, 'tools', 'coop-bot');
+// the port's textures_ultra support files (masks, recipe, pairs): copied beside the pack before it is built
+const ultraSrc = path.join(repo, 'twotowers', 'tools', 'ultra_textures');
+const ultraSupport = () => ['recipe.txt', 'pairs.txt', ...listFiles(ultraSrc, ['masks']).map((l) => l.slice(l.indexOf(' ') + 1))];
 let ultra = fs.existsSync(path.join(repo, 'textures', 'textures_ultra', 'built.txt')) ? path.join(repo, 'textures') : null;
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -105,7 +110,11 @@ http.createServer((req, res) => {
   res.on('finish', () => { if (res.statusCode >= 400) console.log(`${res.statusCode} ${req.method} ${req.url}`); });
   const url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
   if (url === '/' || url === '/index.html') return sendFile(req, res, path.join(repo, 'web', 'index.html'));
-  if (url === '/netplay.js') return sendFile(req, res, path.join(repo, 'web', 'netplay.js'));
+  if (['/netplay.js', '/import.js', '/import-worker.js'].includes(url)) return sendFile(req, res, path.join(repo, 'web', url.slice(1)));
+  // the port's own files for the Ultra textures' build in the browser (import.js), as the hosted site has them
+  if (url === '/ultra-support.txt') return send(res, 200, { 'Content-Type': 'text/plain' }, ultraSupport().join('\n') + '\n');
+  if (url.startsWith('/ultra-support/') && ultraSupport().includes(url.slice('/ultra-support/'.length)))
+    return sendFile(req, res, path.join(ultraSrc, url.slice('/ultra-support/'.length)));
   if (url === '/disc-manifest.json') return send(res, 200, { 'Content-Type': 'text/plain' }, manifest());
   if (url === '/ultra-manifest.json')
     return ultra ? send(res, 200, { 'Content-Type': 'text/plain' }, listFiles(ultra, ['GLOS69', 'textures_ultra']).join('\n') + '\n')
@@ -113,6 +122,12 @@ http.createServer((req, res) => {
   if (url.startsWith('/ultra/') && ultra) {
     const f = icase(under(ultra, url.slice('/ultra/'.length)), ultra);
     return f ? sendFile(req, res, f) : send(res, 403, {}, 'no');
+  }
+  if (url === '/bot-manifest.json')
+    return send(res, 200, { 'Content-Type': 'text/plain' }, listFiles(bot, ['']).filter((l) => /\.txt$/.test(l)).map((l) => l.replace(/ \//, ' ')).join('\n') + '\n');
+  if (url.startsWith('/bot/') && /\.txt$/.test(url)) {
+    const f = under(bot, url.slice('/bot/'.length));
+    return f && fs.existsSync(f) ? sendFile(req, res, f) : send(res, 404, {}, 'no');
   }
   if (url.startsWith('/disc/')) {
     const f = icase(under(disc, url.slice('/disc/'.length)));

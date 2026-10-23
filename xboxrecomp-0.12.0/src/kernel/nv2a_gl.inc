@@ -403,8 +403,11 @@ static void web_ShaderSource(GLuint sh, GLsizei n, const GLchar *const *src, con
 static void *web_gl_context(void)
 {
     EmscriptenWebGLContextAttributes a;
-    const char *sz = getenv("TT_WEB_SIZE");   /* the canvas in pixels, e.g. 1920x1440 (default 1280x960) */
+    /* the canvas in pixels: TT_WEB_SIZE (e.g. 1920x1080), else 960 lines at the picture's shape
+     * (RECOMP_ASPECT, from the ini's aspect: 1707x960 at 16:9, 1280x960 at 4:3) */
+    const char *sz = getenv("TT_WEB_SIZE"), *as = getenv("RECOMP_ASPECT");
     int w = 1280, h = 960;
+    if (as && atof(as) > 1.0 && atof(as) < 6.0) w = (int)(960.0 * atof(as) + 0.5) & ~1;
     if (sz) sscanf(sz, "%dx%d", &w, &h);
     emscripten_webgl_init_context_attributes(&a);
     a.majorVersion = 2; a.minorVersion = 0;
@@ -414,6 +417,7 @@ static void *web_gl_context(void)
     a.enableExtensionsByDefault = 1;
     emscripten_set_canvas_element_size("#screen", w, h);
     s_webgl = emscripten_webgl_create_context("#screen", &a);
+    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttCanvasSize) Module.ttCanvasSize($0, $1); }, w, h);   /* (the page's box takes its shape) */
     if (s_webgl <= 0) { fprintf(stderr, "  [GL] no WebGL2 context on #screen (%d)\n", (int)s_webgl); return NULL; }
     return (void *)(intptr_t)s_webgl;
 }

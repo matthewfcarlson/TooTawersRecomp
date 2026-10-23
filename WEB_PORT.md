@@ -33,9 +33,44 @@ One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. 
 - **Fixes the web needed:** function-pointer type mismatches WebAssembly traps on, a cycle counter that never
   repeats, a yield that really yields (spinning workers cost 30% of the frame rate), WebGL uploads past 4 GB.
 - **macOS (native):** upstream's experimental build opens its window now (frame loop on the main thread); it still
-  needs `RECOMP_GPU_ASYNC=1` and hasn't been played through.
+  needs `RECOMP_GPU_ASYNC=1` (and an x86_64 SDL2 on `DYLD_LIBRARY_PATH` under Rosetta) and plays a level.
 
 **Online co-op:** in progress; design, Cloudflare transport choice and determinism results in `NETPLAY.md`.
+
+**Hosted on Cloudflare (ready, not deployed):** one Worker serves the page and the build as static assets beside the
+match server (`web/site.mjs` -> `web/netplay-server/public/`, `npm run deploy` there). No game data is hosted: on
+first visit the player picks their own ISO (read in the browser: XDVDFS, xiso or redump layout) and, optionally,
+the GLOS69 folder; both are copied into the site's private storage (OPFS, `web/import.js`, `import-worker.js`) and
+the Ultra textures are built there once (`web/web_ultra.cpp`, upstream's builder). Tested end to end against wrangler
+dev: a 4.6 GB ISO imports in about 6 s on this Mac, then the game plays from it. Note: the build is the game's code
+translated from the disc, so publishing it is a decision for the repository's owner, as upstream's binary releases
+are for theirs.
+
+**Widescreen by default** on the web (16:9: the ini's default, an older web ini moved once; the canvas takes the
+picture's shape). The gameplay camera, set at the cut out of a level's opening scene, now widens once play begins
+(it stayed 4:3 for the whole level: `tt_wide_reapply`, `twotowers_manual.c`).
+
+**60 frames/s** (`TT_FPS=60`, upstream's experimental mode) already holds in play on an M-series Mac in Chrome:
+Weathertop, the prologue, Westfold, the Deeping Wall and the Helm's Deep courtyard all at 60, with dips only while a
+level loads. Per frame at 60: the game's code 2-4 ms, the render thread 7-12 ms of the 16.7 (spikes to ~20 ms). From
+the profile, what's left to make it safe on slower machines:
+- the render thread's per-draw work (~1,000-1,700 draws a frame): vertex fetch and compare (`memcmp`), buffer
+  uploads (`bufferData` per draw), texture binding; upstream's diagnostic coordinate count in `draw_primitive`
+  (`fetch_attr` on every draw, ~3% of the thread) can go;
+- video textures: the courtyard's two 640x480 YUY2 frames were decoded texel by texel ~280 times a second; a
+  row-at-a-time path now (identical output, checked over 21,505 decodes): 13.5 -> 11.4 ms a frame. Why they're
+  decoded that often (the texture cache's change check) is still open;
+- netplay at 60: the fixed step becomes 16.667 ms (inputs at 60 Hz; 3 frames of delay is then 50 ms).
+
+**Known problem: sound after the pause menu (web only).** A few seconds after resuming, a voice that was never
+started (0x48 in the test) shows up in the sound chip's voice list as idle; the game is told about it ~200 times a
+second, never removes it, and the chip's front end stays held: the sound cuts out. The native macOS build, given the
+same pause (a pad script pressing Start in Weathertop), is fine: there the voices the game starts after the resume
+(0x45-0x47) play to their end (`voice_off`) and are reused; in the browser they never reach their end, and the unused
+0x48 joins the list (a voice turned on while still listed links to itself, `apu_vp.c`). So it's the web build's
+timing in the sound path, not the chip's emulation as such. Reproduce: a level, Start twice, `RECOMP_APU_VTRACE=1`.
+(Also seen while tracing, shared with the desktop: the voice walk goes on past a trapped voice, and later methods
+overwrite FEDECMETH/FEDECPARAM; changing those alone didn't fix this.)
 
 ## Why a fork of the recomp, not a decomp
 

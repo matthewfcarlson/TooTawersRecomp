@@ -1027,6 +1027,25 @@ static int texc_decode_fast(const Texture *t, uint32_t *out)
             }
         return 1;
     }
+    if (fmt == 0x24 || fmt == 0x25) {
+        /* (web port) 4:2:2 video frames (YUY2, UYVY), a row at a time: the
+         * per-texel path took ~8% of the render thread at 60 fps in the
+         * Helm's Deep courtyard (two 640x480 frames decoded as they change).
+         * The same BT.601 integer conversion as sample_texture's. */
+        uint32_t yoff = fmt == 0x24 ? 0u : 1u;
+        if (!t->pitch) return 0;
+        for (y = 0; y < h; y++) {
+            const uint8_t *row = mem + (size_t)y * t->pitch;
+            for (x = 0; x < w; x++) {
+                const uint8_t *g = row + (size_t)(x & ~1u) * 2;
+                int c = (int)g[(x & 1u) ? 2 + yoff : yoff] - 16, cu = (int)g[1 - yoff] - 128, cv = (int)g[3 - yoff] - 128;
+                int r = (298 * c + 409 * cv + 128) >> 8, gg = (298 * c - 100 * cu - 208 * cv + 128) >> 8, b = (298 * c + 516 * cu + 128) >> 8;
+                r = r < 0 ? 0 : r > 255 ? 255 : r; gg = gg < 0 ? 0 : gg > 255 ? 255 : gg; b = b < 0 ? 0 : b > 255 ? 255 : b;
+                out[y * w + x] = 0xFF000000u | ((uint32_t)r << 16) | ((uint32_t)gg << 8) | (uint32_t)b;
+            }
+        }
+        return 1;
+    }
     if (d3d8_format_is_swizzled(fmt)) {
         uint32_t lf = linear_twin(fmt), bpp = texc_bpp(lf), mx, my;
         static uint32_t tx[2048], ty[2048];

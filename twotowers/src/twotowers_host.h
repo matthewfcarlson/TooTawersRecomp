@@ -67,7 +67,11 @@ static void twotowers_write_default_ini(void)
           "wide_scenes=0\n"
           "; shape of the picture: 4:3 (original), 16:9, 16:10, 21:9, 32:9 or a number such as 2.37.\n"
           ";   Wider than 4:3 widens the 3D view; the HUD keeps its shape. Movies and menus stay 4:3\n"
+#if defined(__EMSCRIPTEN__)
+          "aspect=16:9\n"   /* (web port) widescreen by default in the browser */
+#else
           "aspect=4:3\n"
+#endif
           "; the HUD in a picture wider than 4:3: edges = at the screen's edges, centre = in the 4:3 middle\n"
           "hud=edges\n"
           "; menus, loading and upgrade screens: 1 = fill the screen (past the old TV margin), 0 = original\n"
@@ -256,6 +260,14 @@ static void twotowers_setup_paths_and_log(void)
             if (ex[0]) { strncat(sk, ",", sizeof sk - strlen(sk) - 1); strncat(sk, ex, sizeof sk - strlen(sk) - 1); }
             _putenv_s("RECOMP_ULTRA_SKIP", sk);
         }
+#if defined(__EMSCRIPTEN__)
+        /* (web port) widescreen by default: an ini from before that default (4:3 then) is moved to 16:9 once */
+        if (!GetPrivateProfileIntA("Web", "wide_default", 0, g_ini_path)) {
+            GetPrivateProfileStringA("Display", "aspect", "4:3", v, sizeof v, g_ini_path);
+            if (!strcmp(v, "4:3")) WritePrivateProfileStringA("Display", "aspect", "16:9", g_ini_path);
+            WritePrivateProfileStringA("Web", "wide_default", "1", g_ini_path);
+        }
+#endif
         if (!getenv("RECOMP_ASPECT") && GetPrivateProfileStringA("Display", "aspect", "4:3", v, sizeof v, g_ini_path) && v[0]) {
             float a = 0, x = 0, y = 0;
             char num[32];

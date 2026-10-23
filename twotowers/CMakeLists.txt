@@ -186,7 +186,8 @@ endif()
 # (web port) WebAssembly (memory64) through Emscripten: see ../web/README.md.
 # One build runs under Node (tests) and in the browser.
 if(EMSCRIPTEN)
-    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_platform.c)
+    target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_platform.c
+                                           ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_ultra.cpp)
     target_link_options(${PROJECT_NAME} PRIVATE
         -sMEMORY64=1 -pthread -sWASMFS=1
         -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=24

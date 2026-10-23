@@ -80,12 +80,45 @@ static int mount_fetched(const char *manifest, const char *base_url, const char 
     return n;
 }
 
+/* The player's own files, imported by the page (web/import.js) into its
+ * private storage: disc/ (the disc's files, from their ISO) and ultra/ (the
+ * GLOS69 pack and textures_ultra, built here: TT_WEB_ULTRA_BUILD). Seen at
+ * /local through a case-insensitive layer, as the disc is on the console. */
+static int local_ready(const char *marker)
+{
+    struct stat st;
+    return stat(marker, &st) == 0;
+}
+
+static void mount_local(void)
+{
+    backend_t o = wasmfs_create_opfs_backend();
+    if (o) o = wasmfs_create_icase_backend(o);
+    if (!o || wasmfs_create_directory("/local", 0777, o) != 0) {
+        fprintf(stderr, "[WEB] could not open the imported files\n");
+        return;
+    }
+    if (!getenv("TWOTOWERS_GAME_DIR") && local_ready("/local/disc/.complete")) {
+        setenv("TWOTOWERS_GAME_DIR", "/local/disc", 0);
+        fprintf(stderr, "[WEB] disc: imported (the page's storage)\n");
+    }
+    if (!getenv("RECOMP_ULTRA_ROOT") && local_ready("/local/ultra/textures_ultra/built.txt")) {
+        setenv("RECOMP_ULTRA_ROOT", "/local/ultra", 0);
+        setenv("TT_ULTRA_TEX", "1", 0);
+        setenv("RECOMP_ULTRA_MB", "768", 0);
+        fprintf(stderr, "[WEB] Ultra textures: imported (%s)\n", atoi(getenv("TT_ULTRA_TEX")) ? "on" : "off");
+    }
+}
+
+/* From the page's server when it has them (web/serve.mjs: your disc and the
+ * Ultra textures folder on your machine), else the imported ones. */
 static void mount_disc(void)
 {
     int n = mount_fetched("disc-manifest.json", "disc", "/disc");
-    if (n < 0) { fprintf(stderr, "[WEB] no disc-manifest.json from the server: no disc\n"); return; }
-    setenv("TWOTOWERS_GAME_DIR", "/disc", 0);
-    fprintf(stderr, "[WEB] disc: %d files, fetched as they are read\n", n);
+    if (n >= 0) {
+        setenv("TWOTOWERS_GAME_DIR", "/disc", 0);
+        fprintf(stderr, "[WEB] disc: %d files, fetched as they are read\n", n);
+    }
     /* The Ultra textures (the GLOS69 pack and what is built from it), when
      * the server has them (web/serve.mjs --ultra): on unless the address
      * says TT_ULTRA_TEX=0, within a smaller memory budget than the desktop's */
@@ -96,6 +129,11 @@ static void mount_disc(void)
         setenv("RECOMP_ULTRA_MB", "768", 0);
         fprintf(stderr, "[WEB] Ultra textures: %d files (%s)\n", n, atoi(getenv("TT_ULTRA_TEX")) ? "on" : "off");
     }
+    /* the co-op bot suite's pad scripts (TT_P1SCRIPT=/bot/...; web/tools/coop-suite.mjs) */
+    n = mount_fetched("bot-manifest.json", "bot", "/bot");
+    if (n > 0) fprintf(stderr, "[WEB] bot scripts: %d files at /bot\n", n);
+    mount_local();
+    if (!getenv("TWOTOWERS_GAME_DIR")) fprintf(stderr, "[WEB] no disc: import your ISO on the page\n");
 }
 
 void tt_web_init(int argc, char **argv)
@@ -128,6 +166,10 @@ void tt_web_init(int argc, char **argv)
          * worker: silent for now */
         setenv("SDL_AUDIODRIVER", "dummy", 0);
         mount_disc();
+    }
+    if (!node && getenv("TT_WEB_ULTRA_BUILD")) {   /* (the page's import, then back to it) */
+        extern int tt_web_ultra_build(const char *dir);
+        exit(tt_web_ultra_build(getenv("TT_WEB_ULTRA_BUILD")) ? 1 : 0);
     }
     if (getenv("TT_WEB_EXIT_AFTER")) {
         pthread_t th;

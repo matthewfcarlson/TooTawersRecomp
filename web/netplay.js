@@ -4,8 +4,9 @@
 //
 // Loaded by index.html when the address has ?match=<code>. Both players open
 // the same address; the first in is the host (player 1), the second the guest
-// (player 2). &server=<ws(s)://host> picks the server (default: this page's
-// host, port 8787 -- wrangler dev). The game is told TT_NETPLAY=1.
+// (player 2). &server=<ws(s)://host> picks the server (default: the page's own
+// origin, as hosted on Cloudflare; beside web/serve.mjs's port 8080, the same
+// host's port 8787 -- wrangler dev). The game is told TT_NETPLAY=1.
 //
 // Packets on the data channel (unordered, no retransmits), little-endian:
 //   1 input   u32 newest frame, u8 n, then n x 18 bytes: the inputs of frames
@@ -19,7 +20,9 @@
   const q = new URLSearchParams(location.search);
   const code = q.get('match');
   if (!code) return;
-  const server = (q.get('server') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hostname}:8787`).replace(/\/$/, '');
+  // the server: the page's own origin when hosted (the same Worker), wrangler dev's port beside web/serve.mjs
+  const local = location.port === '8080';
+  const server = (q.get('server') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${local ? location.hostname + ':8787' : location.host}`).replace(/\/$/, '');
   const httpServer = server.replace(/^ws/, 'http');
   const REDUNDANCY = 8;
 

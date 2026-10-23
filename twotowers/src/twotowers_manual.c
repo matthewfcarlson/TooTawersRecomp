@@ -179,7 +179,12 @@ void sub_000CF450(void)
     { extern void tt_framelog(void); tt_framelog(); }   /* (testing: TT_HEADLOG) */
     { extern void tt_coopprobe_frame(void); tt_coopprobe_frame(); }   /* (coop-anything research probe: TT_COOPPROBE) */
     { extern void tt_coop_frame(void); tt_coop_frame(); }   /* (coop-anything prototype: TT_COOP) */
-    { extern volatile unsigned long long tt_hud_drawn_ms; extern uint32_t tt_clock_ms(void); tt_hud_drawn_ms = tt_clock_ms(); }   /* (netplay: game time at a fixed step, tt_netplay.c) */
+    { extern int tt_in_scene(void); extern void tt_wide_reapply(void);
+      int was_scene = tt_in_scene();
+      { extern volatile unsigned long long tt_hud_drawn_ms; extern uint32_t tt_clock_ms(void); tt_hud_drawn_ms = tt_clock_ms(); }   /* (netplay: game time at a fixed step, tt_netplay.c) */
+      /* (web port) play is back after a scene: its camera, set at the cut while the scene still counted, widened now
+       * (the gameplay camera is set once per shot: at a level's start it stayed 4:3 the whole level) */
+      if (was_scene) tt_wide_reapply(); }
     { extern void tt_coop_hud_pre(void); tt_coop_hud_pre(); }   /* (coop-anything: player 2's health sword, after the E3 HUD took its slot) */
     sub_000CF450_gen();
     { extern void tt_coop_hud_post(void); tt_coop_hud_post(); }
@@ -890,6 +895,11 @@ void coop_persp_reapply(void)   /* the game sets a camera's projection only when
     esp = sp; eax = r0; ecx = r1; edx = r2; coop_persp_ours = 0;
 }
 uint32_t coop_persp_obj_get(void) { return coop_persp_obj; }
+void tt_wide_reapply(void)   /* (web port) the shot's camera again, with the widening and zoom as they are now */
+{
+    coop_persp_applied = -1.0f;
+    coop_persp_reapply();
+}
 void sub_0004E890(void)
 {
     coop_persp_n++;

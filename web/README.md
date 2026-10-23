@@ -27,8 +27,10 @@ headers threads need. Saves and settings stay in the browser's private storage f
 disk's E: (UDATA, TDATA) is mapped into the save folder there, since the game folder is the read-only disc.
 
 Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canvas handed to it):
-the levels run at the game's 30 frames/s. `?RECOMP_RENDERER=software` uses the CPU renderer instead (a few
-frames/s in a level), `?TT_WEB_SIZE=1920x1440` sets the canvas's resolution (default 1280x960).
+the levels run at the game's 30 frames/s, or 60 with `?TT_FPS=60` (upstream's experimental mode; it holds 60 in
+the levels tried, `../WEB_PORT.md`). The picture is 16:9 by default (the game's Options -> Display -> Aspect ratio, or
+`[Display] aspect` in the ini; the canvas takes its shape). `?RECOMP_RENDERER=software` uses the CPU renderer
+instead (a few frames/s in a level), `?TT_WEB_SIZE=1920x1080` sets the canvas's resolution (default 960 lines).
 
 **Ultra textures** (the GameCube high-resolution pack, GLOS69, downloaded separately): unpack its `GLOS69` folder
 into `textures/` at the repository's root, copy the port's `twotowers/tools/ultra_textures/{masks,recipe.txt,pairs.txt}`
@@ -40,6 +42,25 @@ Sound starts on the first click or key (browsers allow nothing sooner): the emul
 ring in the shared memory to an AudioWorklet. Controllers go through the browser's Gamepad API (press a button on
 one so the browser shows it), with rumble where the browser supports it; the game's own device and co-op settings
 apply as on the desktop.
+
+## Hosted (Cloudflare)
+
+The same page can be served from Cloudflare, without any game files: on the first visit each player picks their
+own ISO (and, if they want the Ultra textures, the GLOS69 folder unpacked from the pack's download); the page copies
+them into the site's storage in their browser (OPFS: about 4.5 GB for the disc, a few seconds to a minute) and
+builds the Ultra textures there once. Nothing is uploaded. `?setup` opens that screen again (to add the textures,
+or remove the imported files).
+
+```sh
+web/build.sh && node web/site.mjs                     # -> web/netplay-server/public/ (the page, the build; never committed)
+(cd web/netplay-server && npx wrangler dev)           # try it: http://localhost:8787/
+node web/tools/hosted-check.mjs --iso <your .iso>     # a fresh browser through the first visit, then play
+(cd web/netplay-server && npm run deploy)             # publish (your Cloudflare account; the build is the game's code
+                                                      # translated from your disc: publishing it is your decision)
+```
+
+One Worker serves the files and the online co-op server on one origin (`wrangler.jsonc`: static assets first, the
+Worker for `/match/<code>` and `/turn`); `_headers` gives the files the cross-origin isolation threads need.
 
 ## Online co-op (in progress)
 
@@ -62,8 +83,17 @@ node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same bu
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
 node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
+node web/tools/coop-suite.mjs [--only a,b] [--save DIR] [KEY=VALUE ...] # upstream's co-op bot suite in the browser
 # --gpu on either: use the machine's GPU (headless Chrome otherwise draws WebGL in software)
 ```
 
 `browser-check.mjs` and `profile.mjs` need `npm install` in `web/tools` (playwright-core) and a Chromium from Playwright's cache
 (`npx playwright install chromium`).
+
+`coop-suite.mjs` is `tools/coop-bot/suite.ps1` (upstream's fourteen co-op scenarios: bots, scripted pads and
+`TT_COOP_*` test switches, then checks on the game's log) run on the web build: each scenario in a headless Chromium
+of its own on the GPU (a fresh OPFS: its own ini and saves), its pad scripts read from `/bot` (`serve.mjs` serves
+`tools/coop-bot` there), the canvas captured at its shot times. Every scenario also checks for no crash (an access
+violation, a wasm trap, an abort, a page error) and a median of 28+ frames/s (`--min-fps`). The save scenarios want
+a save to start from (`--save <a UDATA/45410010 folder>`, as upstream's `$SaveBackup`); without one they start with
+none. About half an hour; results in `<out>/summary.txt`, each scenario's whole log and frames beside it.
