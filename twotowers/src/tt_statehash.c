@@ -116,7 +116,9 @@ void tt_statehash_frame(uint32_t game_ms)
     }
     if (on && inplay) {
         uint32_t st = SH_MEM32(SH_GAMESTATE);
+        extern int tt_netplay_tick_kind(void);
         if (st != 6 && st != 8) { frame = 0; return; }
+        if (tt_netplay_tick_kind() != 1) return;   /* (a load's tick, not a frame: tt_netplay.c) */
     }
     frame++;
     if (frame == 1) {   /* testing: another run's words, at the start of play */

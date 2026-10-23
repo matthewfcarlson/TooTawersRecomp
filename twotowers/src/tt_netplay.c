@@ -9,7 +9,9 @@
  *
  * Frames are counted in play only (the game's state at 0x4AD050 is 6 or 8),
  * from 1 each time play begins: how many frames a level's load takes differs
- * between machines, the first frame of play does not.
+ * between machines, the first frame of play does not. They are the game's
+ * frames, not every tick of its frame timer (a level's load ticks it
+ * thousands of times a frame: tt_netplay_tick).
  *
  * Sources of a frame's input, for now:
  *   TT_NETINPUT_SCRIPT=<file>   lines "<from> <to> <port> <control> [value]":
@@ -234,6 +236,35 @@ static int np_latch(tt_np_dword port, TTPadState *state)
  * machines however long each one's loading took -- and the wall clock
  * otherwise, as before. */
 static volatile uint32_t s_play_frames;
+uint32_t tt_timer_caller;           /* where the frame timer was called from (sub_000E3350's return address) */
+volatile uint32_t tt_frame_waits;   /* the game's waits for the next frame (sub_000E00E0): one a frame shown */
+
+/* Which of the frame timer's ticks are frames of the game. While a level
+ * loads, its load wait (sub_0007C1D0: ticks the timer until the level is
+ * ready, called from 0x0007C234) ticks it thousands of times for each
+ * loading-screen frame shown -- as many as the machine is fast -- and loads
+ * within a level (a scene's end loads, for one) tick it without a frame
+ * between. Counting those made frame 1,000 a different moment on each
+ * machine. A frame in play is a tick after a frame was shown (the game's
+ * wait for the next frame, sub_000E00E0, between it and the last tick) other
+ * than the load wait's: counted from the level's first (the fade-in from
+ * black at its start: the same moment on every machine). At a fixed step
+ * (tt_frametime, twotowers_manual.c) a frame is given the step, a tick of a
+ * load within the level no time, and the ticks before the level's first
+ * frame their real time (they draw the loading screen only).
+ * Returns 1 (a frame), 0 (no time), -1 (real time). */
+static int s_level_started, s_tick_kind = -1;
+void tt_netplay_tick(uint32_t caller)   /* (each tick, first: sub_000E3350 with its return address) */
+{
+    static uint32_t last_waits;
+    uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset), w = tt_frame_waits;
+    tt_timer_caller = caller;
+    if (st != 6 && st != 8) { s_level_started = 0; s_tick_kind = -1; }
+    else if (w != last_waits && caller != 0x0007C234u) { s_level_started = 1; s_tick_kind = 1; }
+    else s_tick_kind = s_level_started ? 0 : -1;
+    last_waits = w;
+}
+int tt_netplay_tick_kind(void) { return s_tick_kind; }
 uint32_t tt_clock_ms(void)
 {
     static double step = -1.0;
@@ -253,7 +284,7 @@ void tt_netplay_frame(void)
 {
     static int on = -1;
     uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset);
-    if (st == 6 || st == 8) s_play_frames++;   /* (tt_clock_ms) */
+    if (s_tick_kind == 1) s_play_frames++;   /* (tt_clock_ms) */
     if (on < 0) {
         const char *sc = getenv("TT_NETINPUT_SCRIPT"), *net = getenv("TT_NETPLAY");
         on = 0;
@@ -268,8 +299,40 @@ void tt_netplay_frame(void)
             fprintf(stderr, "  [NETPLAY] online: input delay %d frames\n", s_delay);
         } else if (sc && *sc) { np_load_script(sc); on = 1; xbox_input_latch = np_latch; }
     }
+    {   /* testing: TT_NETPLAY_WATCH=addr,addr,... (hex) -- each word's changes ([NPWATCH]: frames
+         * counted for tt_clock_ms, frames in play) */
+        static int nw = -1; static uint32_t wa[16], wv[16];
+        if (nw < 0) {
+            const char *e = getenv("TT_NETPLAY_WATCH");
+            nw = 0;
+            while (e && *e && nw < 16) { wa[nw] = (uint32_t)strtoul(e, NULL, 16); wv[nw] = 0xDEADBEEFu; nw++; e = strchr(e, ','); if (e) e++; }
+        }
+        for (int i = 0; i < nw; i++) {
+            uint32_t v = *(const volatile uint32_t *)((uintptr_t)wa[i] + g_xbox_mem_offset);
+            if (v != wv[i]) { fprintf(stderr, "  [NPWATCH] frame %u (%u in play): %08X %08X -> %08X\n", s_play_frames, s_frame, wa[i], wv[i], v); wv[i] = v; }
+        }
+    }
+    {   /* testing: TT_NETPLAY_TICKLOG=n -- in play (state 6 or 8), the timer's ticks after a frame
+         * (the first n of each stretch), and those without one where it is called from somewhere new
+         * ([NPTICK]: the real time, the frames shown, the caller; tt_netplay_tick) */
+        static int tl = -1, n; static uint32_t lastst, lastw, lastc;
+        if (tl < 0) { const char *e = getenv("TT_NETPLAY_TICKLOG"); tl = e ? atoi(e) : 0; }
+        if (st != lastst) { lastst = st; n = 0; }
+        if (tl > 0 && (st == 6 || st == 8) && tt_frame_waits == lastw && tt_timer_caller != lastc) {
+            lastc = tt_timer_caller;
+            fprintf(stderr, "  [NPTICK] tick %u: no frame wait since the last, called from %08X\n", s_play_frames, tt_timer_caller);
+        }
+        if (tl > 0 && (st == 6 || st == 8) && n < tl && tt_frame_waits != lastw) {
+            extern float tt_frame_real_ms(void);
+            n++;
+            fprintf(stderr, "  [NPTICK] tick %u: real %.3f ms, frame waits %u (+%u), called from %08X\n", s_play_frames, (double)tt_frame_real_ms(), tt_frame_waits, tt_frame_waits - lastw, tt_timer_caller);
+            lastc = 0;
+            lastw = tt_frame_waits;
+        }
+    }
     if (!on) return;
     if (st != 6 && st != 8) { s_frame = 0; return; }
+    if (s_tick_kind != 1) return;   /* (a load's tick: the frame's input stays latched) */
     s_frame++;
     if (s_net) np_net_frame(s_frame);
     else np_script_frame(s_frame);

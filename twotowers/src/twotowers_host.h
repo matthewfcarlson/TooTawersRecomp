@@ -261,8 +261,10 @@ static void twotowers_setup_paths_and_log(void)
             _putenv_s("RECOMP_ULTRA_SKIP", sk);
         }
 #if defined(__EMSCRIPTEN__)
-        /* (web port) widescreen by default: an ini from before that default (4:3 then) is moved to 16:9 once */
-        if (!GetPrivateProfileIntA("Web", "wide_default", 0, g_ini_path)) {
+        /* (web port) widescreen by default: an ini from before that default (4:3 then) is moved to 16:9 once.
+         * In the browser only (TT_WEB_CANVAS): a test run under Node starts from a new ini, and there a
+         * read after the ini's save (written aside, then renamed over) fails to close (WasmFS's Node backend) */
+        if (getenv("TT_WEB_CANVAS") && !GetPrivateProfileIntA("Web", "wide_default", 0, g_ini_path)) {
             GetPrivateProfileStringA("Display", "aspect", "4:3", v, sizeof v, g_ini_path);
             if (!strcmp(v, "4:3")) WritePrivateProfileStringA("Display", "aspect", "16:9", g_ini_path);
             WritePrivateProfileStringA("Web", "wide_default", "1", g_ini_path);

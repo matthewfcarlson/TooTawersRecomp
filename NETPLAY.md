@@ -74,36 +74,51 @@ Built: the match server (`web/netplay-server`: a Worker and one Durable Object p
   ICE stays in "checking" -- this machine's only route is a VPN (10.2.0.2), which does not hairpin, and Chrome
   gathers no loopback candidates. Between real players the direct path or Cloudflare TURN covers it; the
   fallback through the server worked at once (2-10 ms round trip locally).
-- **The co-op game still parts** (`same inputs, the game differs`), between frames ~1,030 and ~1,140. Found and
+- **The co-op game parted** (`same inputs, the game differs`), between frames ~1,030 and ~1,140. Found and
   fixed on the way: the co-op's own timers (114 uses of `GetTickCount` in `coop_now()`), the heroes' fall and
   sprint timing, and the cutscene test (`tt_in_scene`: "no HUD drawn for 300 ms of wall time", true on any slow
-  frame) now run on `tt_clock_ms()`, game time at a fixed step. Not yet the last cause:
-  - two Node runs of the same co-op script still part in some pairs (1,083, 1,085, 1,100) and not in others (one
-    pair matched for 1,166 frames): a race, not latent state;
-  - a run that stalls 5 s at frame 4 (as the host waits for the guest) parts at frame 1,030 every time: a cause
-    of its own -- the kernel's timer thread keeps running the game's interrupt code (vblank, sound, D3D
-    callbacks, timer DPCs) in real time while the game thread waits;
-  - **the remaining race, located** (two more Node pairs, `.data/.bss` dumped every frame 1,040-1,140; both
-    parted, at 1,065 and 1,066): first the game's frame-pacing words part (`0x4B7600` "frame done",
-    `0x4B7618` the vblank count, `0x4B75F0`, `0x4B72E4`, `0x4B7614`, from frame ~1,042), then at ~1,063 game
-    state switches over in one run and not the other (`0x1BAE60` 1 vs 3, floats at `0x1D7E5C` and `0x4A90CC`
-    1.0 vs 0 -- the end of the intro cutscene and the HUD coming up), and two frames later everything. The
-    game paces its frames by real vblanks: its vblank callback `sub_000DFF80` (no callers; registered with D3D)
-    adds one to `0x4B7618` on every vblank -- run by the kernel's timer thread at 60 Hz of wall time -- and
-    signals the frame event while `0x4B75F0` is set; the frame wait (`sub_000E00E0`) sleeps until the count
-    reaches the frame's vblanks (2 at 30 frames/s), then clears it and sets `0x4B7600`. **Fix to make next:**
-    at a fixed step, the callback stops counting (it still signals), and the frame wait's hook paces wall time
-    itself and fills in exactly one step's count before the game reads it -- upstream's unlocked mode already
-    fills the count by hand (`MEM32(0x4B7618) = 8`, `twotowers_manual.c`). This should also fix the stall case.
-  - noise identified: the D3D runtime's fence and push-buffer bookkeeping (`0x4B7280`-`0x4B72BC`, filled in by
-    `sub_000E06F0`'s device) follows the GPU's real-time progress; the profiler's cycle counts; the timer's raw
-    source values.
+  frame) now run on `tt_clock_ms()`, game time at a fixed step.
 
-Next steps for determinism: longer fights, other levels, both heroes (co-op); then what the other threads write
-into game memory on real-time schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound
-interrupts, D3D callbacks, timer DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams.
-Anything the simulation reads from those must be tied to game frames. A desync check must then hash more than
-positions: the frame-1,128 diff of the first failure showed orientations differing before positions did.
+### The frame count (2026-10-23): fixed
+
+**The cause: frames were counted from the game's frame timer, and a level's load ticks it in a tight loop.**
+While a level loads (game state 6 already), its load wait (`sub_0007C1D0`, calling the timer from `0x0007C234`)
+ticks the frame timer thousands of times for each loading-screen frame shown: 1.5-3.3 million ticks in a
+Weathertop load under Node, as many as the machine is fast. Each was counted as a frame in play (and, at the fixed
+step, given 33 ms of game time), so "frame 1,000" of an input script, or of the online exchange, was a different
+moment of the game on each machine. Seen with `TT_NETPLAY_WATCH` (a word's changes by frame): the fade-in from
+black at the level's start came at 89, 90 and 92 in three runs (fewer ticks there: the per-frame state hashing
+slowed the load loop), and everything after was shifted the same: the intro ended exactly 1,022 frames after the
+fade in all three. A 5 s stall at frame 500 changed nothing.
+
+**The fix** (`tt_netplay.c`, `tt_netplay_tick`): a tick is a frame when a frame was shown since the last tick
+(the game's wait for the next frame, `sub_000E00E0`, ran between them) and it is not the load wait's. The level
+loop's ticks all qualify (the intro's from `0x000E8CDF`, play's and the pause menu's from `0x0007C41C`); ticks
+without a frame between (the load wait's, loads within the level -- the intro's end, `0x0007CE1E` --, pausing and
+resuming, `0x0007C5C6` / `0x0007B868`) do not. Frames in play count from the level's first frame (frame 2 is the
+fade-in on every machine), as do `tt_clock_ms()` and the state hash's frames. At the fixed step a frame gets the
+step, a tick of a load within the level no time, and the ticks before the level's first frame their real time
+(they only draw the loading screen). `TT_NETPLAY_TICKLOG=n` logs the ticks and where the timer was called from.
+
+**Result: two Node runs of the co-op fight script (Aragorn and Legolas, Weathertop, frames 1,150-2,745) matched in
+every one of 5,105 frames** (actor positions; the same enemies targeting each hero, the same 17 and 2 hits, the
+same health), where they used to part ~65 frames into the fight. **Stalls too:** runs held 5 s at frame 4 (as the
+host waits for the guest at the start, which used to part at frame 1,030 every time) and at frame 1,300 (mid-fight)
+matched the unstalled run in all 5,164 frames. **Online:** two browsers (`netplay-check.mjs`, the host's pad walking
+and attacking) played five minutes of one match at 30 frames/s with no desync reported.
+
+The earlier lead (the game's frame pacing by real vblanks: `0x4B7618` counted by the vblank callback
+`sub_000DFF80` on the kernel's timer thread, read by the frame wait) was not it: only the frame wait reads those
+words, and it clears them every frame. They differ between runs (noise, as are the D3D runtime's fence and
+push-buffer bookkeeping at `0x4B7280`-`0x4B72BC`, the profiler's cycle counts and the timer's raw source values)
+without the simulation reading them.
+
+Next steps for determinism: longer play, other levels, a level's end and the next level's load, saves and
+checkpoints; two real machines (different speeds); then what the other threads write into game memory on real-time
+schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound interrupts, D3D callbacks, timer
+DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams. Anything the simulation reads from
+those must be tied to game frames. A desync check must then hash more than positions: the frame-1,128 diff of the
+first failure showed orientations differing before positions did.
 
 ## Transport on Cloudflare
 

@@ -612,6 +612,7 @@ static void tt_frametime(void);
  * moment for moment) */
 static volatile uint32_t tt_game_ms, tt_lvl_ms;
 static float tt_real_ms;   /* (the frame's time before any TT_FAKE_FRAME_MS) */
+float tt_frame_real_ms(void) { return tt_real_ms; }   /* (netplay, testing) */
 static uint32_t tt_game_clock(void) { return getenv("TT_PADCLOCK_LVL") ? tt_lvl_ms : tt_game_ms; }
 /* testing: TT_MEMDUMP_GAME=prefix, TT_MEMDUMP_AT=t1,t2,... -- all of RAM at
  * those ms of game time after the last long frame (a level's load ends with
@@ -645,6 +646,7 @@ void sub_000E3350(void)
     extern uint32_t (*volatile xbox_pad_clock)(void);
     float ms; uint32_t w;
     if (!xbox_pad_clock) xbox_pad_clock = tt_game_clock;
+    { extern void tt_netplay_tick(uint32_t caller); tt_netplay_tick(MEM32(esp)); }   /* (netplay: which ticks are frames, tt_netplay.c) */
     tt_frametime();
     {   /* (netplay) the frame's input fixed (tt_netplay.c), then the state hashed
          * at the frame boundary (tt_statehash.c, TT_STATEHASH) */
@@ -720,9 +722,13 @@ static void tt_frametime(void)
     {   /* testing: TT_FAKE_FRAME_MS=x -- every frame's time is x ms, as at 1000/x fps */
         static float fake = -1.0f;
         if (fake < 0.0f) { const char *e = getenv("TT_FAKE_FRAME_MS"); fake = e ? (float)atof(e) : 0.0f; }
-        if (fake > 0.0f) {
-            float fs = fake * 0.001f; uint32_t w;
-            memcpy(&w, &fake, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
+        /* (netplay) a level's frames only; a load's ticks none, the loading screen's real time (tt_netplay.c) */
+        extern int tt_netplay_tick_kind(void);
+        int kind = fake > 0.0f ? tt_netplay_tick_kind() : -1;
+        if (kind >= 0) {
+            float fake_ms = kind ? fake : 0.0f;
+            float fs = fake_ms * 0.001f; uint32_t w;
+            memcpy(&w, &fake_ms, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
             memcpy(&w, &fs, 4); if (MEM32(0x4B8BA0u)) MEM32(0x4B8BA0u) = w;
             {   /* (netplay) the rest of the timer too: the raw step (ms at
                  * 0x4B8B94, s at 0x4B8B9C) and the unpaused copies
@@ -730,7 +736,7 @@ static void tt_frametime(void)
                  * at real time, two runs at a fixed step parted in combat */
                 static const uint32_t ms_at[3] = { 0x4B8B94u, 0x4B8BA4u, 0x4B8BA8u }, s_at[3] = { 0x4B8B9Cu, 0x4B8BACu, 0x4B8BB0u };
                 int i;
-                memcpy(&w, &fake, 4); for (i = 0; i < 3; i++) if (MEM32(ms_at[i])) MEM32(ms_at[i]) = w;
+                memcpy(&w, &fake_ms, 4); for (i = 0; i < 3; i++) if (MEM32(ms_at[i])) MEM32(ms_at[i]) = w;
                 memcpy(&w, &fs, 4); for (i = 0; i < 3; i++) if (MEM32(s_at[i])) MEM32(s_at[i]) = w;
             }
         }
@@ -2167,6 +2173,7 @@ void sub_000E00E0(void)
     extern void tt_menus_tick(void);
     uint32_t sa = eax, sb = ebx, sc = ecx, sd = edx, ss = esi, sdi = edi, sp = esp;
     tt_menus_tick();
+    { extern volatile uint32_t tt_frame_waits; tt_frame_waits++; }   /* (netplay, tt_netplay.c) */
     eax = sa; ebx = sb; ecx = sc; edx = sd; esi = ss; edi = sdi; esp = sp;
     sub_000E00E0_gen();
 }
