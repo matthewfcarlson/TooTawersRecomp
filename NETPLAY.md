@@ -62,6 +62,43 @@ Results (Node, the same build twice, side by side, Weathertop, same script):
   functions) and a per-object generator in `sub_00107ACC` (state at `+0x40C`, constant `0x19660D`); deterministic
   given the same state and call order, which the fixes above give.
 
+### Online, end to end (2026-10-23, night)
+
+Built: the match server (`web/netplay-server`: a Worker and one Durable Object per match, tested locally with
+`wrangler dev`), the page's client (`web/netplay.js`) and the game's network input mode (`tt_netplay.c`,
+`TT_NETPLAY=1`). `web/tools/netplay-check.mjs` plays a match between two headless Chromes on one machine.
+
+- **Lockstep works**: two browsers run one co-op game (Aragorn and Legolas) at 30 frames/s, each frame waiting
+  for the other's input; the inputs are identical on both sides (their running hash matches at every check).
+- **The data channel did not connect locally**: signalling completes (offer, answer, candidates both ways) but
+  ICE stays in "checking" -- this machine's only route is a VPN (10.2.0.2), which does not hairpin, and Chrome
+  gathers no loopback candidates. Between real players the direct path or Cloudflare TURN covers it; the
+  fallback through the server worked at once (2-10 ms round trip locally).
+- **The co-op game still parts** (`same inputs, the game differs`), between frames ~1,030 and ~1,140. Found and
+  fixed on the way: the co-op's own timers (114 uses of `GetTickCount` in `coop_now()`), the heroes' fall and
+  sprint timing, and the cutscene test (`tt_in_scene`: "no HUD drawn for 300 ms of wall time", true on any slow
+  frame) now run on `tt_clock_ms()`, game time at a fixed step. Not yet the last cause:
+  - two Node runs of the same co-op script still part in some pairs (1,083, 1,085, 1,100) and not in others (one
+    pair matched for 1,166 frames): a race, not latent state;
+  - a run that stalls 5 s at frame 4 (as the host waits for the guest) parts at frame 1,030 every time: a cause
+    of its own -- the kernel's timer thread keeps running the game's interrupt code (vblank, sound, D3D
+    callbacks, timer DPCs) in real time while the game thread waits;
+  - **the remaining race, located** (two more Node pairs, `.data/.bss` dumped every frame 1,040-1,140; both
+    parted, at 1,065 and 1,066): first the game's frame-pacing words part (`0x4B7600` "frame done",
+    `0x4B7618` the vblank count, `0x4B75F0`, `0x4B72E4`, `0x4B7614`, from frame ~1,042), then at ~1,063 game
+    state switches over in one run and not the other (`0x1BAE60` 1 vs 3, floats at `0x1D7E5C` and `0x4A90CC`
+    1.0 vs 0 -- the end of the intro cutscene and the HUD coming up), and two frames later everything. The
+    game paces its frames by real vblanks: its vblank callback `sub_000DFF80` (no callers; registered with D3D)
+    adds one to `0x4B7618` on every vblank -- run by the kernel's timer thread at 60 Hz of wall time -- and
+    signals the frame event while `0x4B75F0` is set; the frame wait (`sub_000E00E0`) sleeps until the count
+    reaches the frame's vblanks (2 at 30 frames/s), then clears it and sets `0x4B7600`. **Fix to make next:**
+    at a fixed step, the callback stops counting (it still signals), and the frame wait's hook paces wall time
+    itself and fills in exactly one step's count before the game reads it -- upstream's unlocked mode already
+    fills the count by hand (`MEM32(0x4B7618) = 8`, `twotowers_manual.c`). This should also fix the stall case.
+  - noise identified: the D3D runtime's fence and push-buffer bookkeeping (`0x4B7280`-`0x4B72BC`, filled in by
+    `sub_000E06F0`'s device) follows the GPU's real-time progress; the profiler's cycle counts; the timer's raw
+    source values.
+
 Next steps for determinism: longer fights, other levels, both heroes (co-op); then what the other threads write
 into game memory on real-time schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound
 interrupts, D3D callbacks, timer DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams.
