@@ -76,6 +76,23 @@ server. The game runs in lockstep at a fixed step with 3 frames of input delay; 
 connection (direct, relayed by TURN, or through the server) and the round trip, and says so if the two games ever
 differ (a desync). Design and status: `../NETPLAY.md`.
 
+### Two machines
+
+`netplay-check.mjs --guest-cdp` puts the guest in a Chromium on another Mac (on the same network; it
+needs only Playwright's cached Chromium, no Node). One ssh connection gives that machine this one's page and match
+servers and this one its browser:
+
+```sh
+ssh -N -L 9223:127.0.0.1:9222 -R 8080:127.0.0.1:8080 -R 8787:127.0.0.1:8787 user@other-mac &
+ssh user@other-mac 'cd ~/Library/Caches/ms-playwright/chromium-*/chrome-mac-arm64 &&
+  "./Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing" --headless=new --remote-debugging-port=9222 --user-data-dir=/tmp/tt-guest --enable-gpu --ignore-gpu-blocklist \
+  --use-angle=metal --disable-features=WebRtcHideLocalIpsWithMdns about:blank > /tmp/tt-chrome.log 2>&1 &'
+node web/tools/netplay-check.mjs --seconds 200 --guest-cdp http://localhost:9223 [KEY=VALUE ...]
+```
+
+The game then runs on that machine's CPU and GPU and the match's data channel crosses the network (the disc and
+the signalling still come through the tunnel).
+
 ## Test it
 
 ```sh

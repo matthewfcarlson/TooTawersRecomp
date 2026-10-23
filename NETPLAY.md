@@ -113,8 +113,16 @@ words, and it clears them every frame. They differ between runs (noise, as are t
 push-buffer bookkeeping at `0x4B7280`-`0x4B72BC`, the profiler's cycle counts and the timer's raw source values)
 without the simulation reading them.
 
+**Two machines (2026-10-23):** the guest in a headless Chromium on a second Mac (on the same network, its own
+CPU and GPU; `netplay-check.mjs --guest-cdp`, `web/README.md`), the host on this laptop: connected direct over the
+LAN (WebRTC, 10-30 ms round trip), both at 30 frames/s, five minutes with no desync, the host having waited 18 s at
+frame 4 for the guest's slower load. **With the sound interrupts:** the web build now delivers DirectSound's
+interrupts (they never reached the game before: `WEB_PORT.md`, the pause-menu sound), which run guest code on
+real-time schedules; the Node fight pair still matched (positions in all 4,203 frames compared, the combat log line
+for line).
+
 Next steps for determinism: longer play, other levels, a level's end and the next level's load, saves and
-checkpoints; two real machines (different speeds); then what the other threads write into game memory on real-time
+checkpoints; then what the other threads write into game memory on real-time
 schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound interrupts, D3D callbacks, timer
 DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams. Anything the simulation reads from
 those must be tied to game frames. A desync check must then hash more than positions: the frame-1,128 diff of the

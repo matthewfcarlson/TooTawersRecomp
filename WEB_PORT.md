@@ -21,8 +21,8 @@ One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. 
   `va + offset` as on the desktop (`win32_compat_wasm_mem.inc`). Second views can't alias: the RAM mirrors and the
   tiled view at 0xF0000000 are refused and logged; the game plays without them.
 - **Device traps:** only the APU (pointer accesses from DirectSound) and AC'97 trapped on the desktop; the GPU never
-  did. AC'97 resets are completed in code (`postproc_ac97.py`); the APU's pointer accesses still need routing (if
-  some sounds turn out missing, that is why).
+  did. AC'97 resets are completed in code (`postproc_ac97.py`); the APU's pointer accesses (DirectSound's) go
+  through a checked access (`postproc_apu_ptr.py`).
 - **Rendering:** the port's OpenGL renderer on WebGL2, on its own thread with the page's canvas handed to it
   (`nv2a_gl.inc`: BGRA swizzles, no base-vertex draws, GLSL ES); fast after three fixes: no growable memory,
   `glGetError` rarely, every streamed upload a fresh buffer (orphaning) -- from 0.6 to 30 frames/s.
@@ -62,15 +62,15 @@ the profile, what's left to make it safe on slower machines:
   decoded that often (the texture cache's change check) is still open;
 - netplay at 60: the fixed step becomes 16.667 ms (inputs at 60 Hz; 3 frames of delay is then 50 ms).
 
-**Known problem: sound after the pause menu (web only).** A few seconds after resuming, a voice that was never
-started (0x48 in the test) shows up in the sound chip's voice list as idle; the game is told about it ~200 times a
-second, never removes it, and the chip's front end stays held: the sound cuts out. The native macOS build, given the
-same pause (a pad script pressing Start in Weathertop), is fine: there the voices the game starts after the resume
-(0x45-0x47) play to their end (`voice_off`) and are reused; in the browser they never reach their end, and the unused
-0x48 joins the list (a voice turned on while still listed links to itself, `apu_vp.c`). So it's the web build's
-timing in the sound path, not the chip's emulation as such. Reproduce: a level, Start twice, `RECOMP_APU_VTRACE=1`.
-(Also seen while tracing, shared with the desktop: the voice walk goes on past a trapped voice, and later methods
-overwrite FEDECMETH/FEDECPARAM; changing those alone didn't fix this.)
+**Sound after the pause menu (fixed, 2026-10-23).** The sound cut out a few seconds after resuming. The cause was
+the open risk above: DirectSound reaches the APU's registers through a pointer kept in its device object, and in
+WebAssembly those reads and writes went to plain memory. Its interrupt handler never saw the chip's status (no
+interrupt reached the game at all before the pause), and after the pause menu it answered an idle voice's trap from
+stale registers, never took the voice off the list, and the chip's front end stayed held (1,300+ frames a second).
+`postproc_apu_ptr.py` now routes every non-constant access in DirectSound's code (0x128B60-0x134934, ~4,400)
+through a check that calls the APU for its registers; on the desktop its macros are plain `MEMn` (the fault path, as
+before). Since: interrupts from the start as on the desktop, and 90 s of fighting after a pause with the front end
+held 0-32 frames a second (the native build: 0-29).
 
 ## Why a fork of the recomp, not a decomp
 
@@ -104,7 +104,7 @@ Ghidra project in `re/` (local, ignored) and override the function in C, the way
 
 | Piece | Today | Web plan |
 |---|---|---|
-| GPU (NV2A, 0xFD000000) and audio (APU, 0xFE800000) registers | *(Corrected after reading the code.)* The GPU aperture is plain memory; a polling thread acks the GPU (`xbox_memory_layout.c`). Only the APU (unmapped, fault + x86 decode, `apu_mmio_hook.c`) and an AC'97 write trap use faults. | No faults in WebAssembly. AC'97: done in code. APU: constant accesses already calls (`postproc_apu.py`); the pointer accesses from DirectSound (0x128B60-0x134934) still to route through a checked `MEMn`. |
+| GPU (NV2A, 0xFD000000) and audio (APU, 0xFE800000) registers | *(Corrected after reading the code.)* The GPU aperture is plain memory; a polling thread acks the GPU (`xbox_memory_layout.c`). Only the APU (unmapped, fault + x86 decode, `apu_mmio_hook.c`) and an AC'97 write trap use faults. | No faults in WebAssembly. AC'97: done in code. APU: constant accesses already calls (`postproc_apu.py`); the pointer accesses from DirectSound (0x128B60-0x134934) through a checked access (`postproc_apu_ptr.py`). |
 | Memory mirrors | 28 aliased views of one file mapping (`src/kernel/xbox_memory_layout.c`): the same RAM at several addresses (contiguous/physical addresses, 0x80000000+). | WebAssembly can't alias pages: mask the address in the checked `MEMn` path (and in the GPU's reads of guest memory). Find out at run time whether game code (not only the XDK) uses mirrored addresses. |
 | Kernel, threads, files | Win32, plus a POSIX emulation of it (`src/platform/win32_compat.c`). Xbox threads become host threads. | Emscripten pthreads (needs `SharedArrayBuffer`: serve with COOP/COEP headers); the disc read from a user-picked file into the browser's file storage (OPFS) through Emscripten's filesystem. |
 | Renderer | NV2A push-buffer emulation (from xemu) drawing with Direct3D 11, Vulkan (DXVK) or OpenGL 3.3 core (`src/kernel/nv2a_gl.inc`), plus a CPU renderer (`renderer=software`, `nv2a_sw3d.inc`). | First boot on the software renderer. Then a **WebGPU** backend (not WebGL2: WebGL2 has no compute shaders, which the ray tracing needs). The same backend runs on the desktop through Dawn or wgpu, so the browser and desktop builds share one renderer. The GL backend is the closest model to port from. |

@@ -325,6 +325,21 @@ void xbox_apu_w32(uint32_t va, uint32_t v)
     mcpx_apu_mmio_write(g_apu_state, va - APU_MMIO_BASE, v, 4);
 }
 
+/* (web port) DirectSound's pointer accesses that land on the APU, in builds
+ * without the fault path (twotowers/postproc_apu_ptr.py), at their own size. */
+uint32_t xbox_apu_rn(uint32_t va, int size)
+{
+    if (!g_apu_state) return 0;
+    g_apu_mmio_read_count++;
+    return (uint32_t)mcpx_apu_mmio_read(g_apu_state, va - APU_MMIO_BASE, (unsigned)size);
+}
+void xbox_apu_wn(uint32_t va, uint32_t v, int size)
+{
+    if (!g_apu_state) return;
+    g_apu_mmio_write_count++;
+    mcpx_apu_mmio_write(g_apu_state, va - APU_MMIO_BASE, v, (unsigned)size);
+}
+
 /* ============================================================
  * Public API (called from VEH in main.c)
  * ============================================================ */

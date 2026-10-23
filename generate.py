@@ -76,6 +76,7 @@ def main():
     run([py, os.path.join(GAME, "postproc_ac97.py"), gen], quiet_filter=["routed"])
     run([py, os.path.join(GAME, "postproc_x87.py"), gen], quiet_filter=["x87"])
     run([py, os.path.join(GAME, "postproc_regs.py"), gen], quiet_filter=["registers"])
+    run([py, os.path.join(GAME, "postproc_apu_ptr.py"), gen], quiet_filter=["checked"])   # (web port)
     n = len([f for f in os.listdir(gen) if f.endswith(".c")])
     print("Done: %d source files in twotowers/src/recomp/gen. Now build with CMake (README.md)." % n)
 
