@@ -121,6 +121,12 @@ interrupts (they never reached the game before: `WEB_PORT.md`, the pause-menu so
 real-time schedules; the Node fight pair still matched (positions in all 4,203 frames compared, the combat log line
 for line).
 
+**What each player brings (2026-10-23):** the co-op settings in each player's ini change the game: the same scripted
+fight on Easy and on Expert parted at frame 2,623 (positions), P1's health 856 against 1 by the end. The extra
+heroes' records (`heroes/records.dat`, read when player 2 is Gandalf, Boromir...) would too, and a save once a game
+starts from one. A hosted game now takes all of them from the host (`web/README.md`, "One game, the host's settings
+and saves"), with a fingerprint check before the guest starts.
+
 Next steps for determinism: longer play, other levels, a level's end and the next level's load, saves and
 checkpoints; then what the other threads write into game memory on real-time
 schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound interrupts, D3D callbacks, timer

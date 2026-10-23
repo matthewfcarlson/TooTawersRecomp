@@ -189,12 +189,18 @@
     }
   }
 
+  // the lobby's own messages (lobby.js: the host's saves for the guest) go through the same connection: it sends
+  // with ttNetSend and hears every message, ours included, through ttNetListeners[type]
+  self.ttNetSend = (obj) => { if (state.ws?.readyState === 1) { state.ws.send(JSON.stringify(obj)); return true; } return false; };
+  const tell = (m) => { for (const fn of self.ttNetListeners?.[m.type] || []) try { fn(m); } catch (e) { log(`${m.type}: ${e.message}`); } };
+
   let signals = Promise.resolve();   // (signalling messages handled in the order they came)
   const ws = state.ws = new WebSocket(`${server}/match/${encodeURIComponent(code)}` + (self.ttPlayerId ? `?player=${self.ttPlayerId()}` : ''));
   ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') return receive(e.data);   // relayed inputs
     const m = JSON.parse(e.data);
+    queueMicrotask(() => tell(m));
     if (m.type === 'welcome') {
       state.role = m.role;
       self.ttRememberRole?.(m.role);

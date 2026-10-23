@@ -88,6 +88,18 @@ player player 2 for good, a third is turned away, and a reload or the link opene
 game can't be joined halfway, so when a player comes back to a game under way, the other page reloads too and both
 start the level over together. The splash lists your recent games (a week: then the server forgets them) to rejoin.
 
+**One game, the host's settings and saves.** Both machines must start the very same game, so whatever changes it
+comes from the host: the co-op settings (difficulty, player 2's teleport, double pickups) travel with the game and
+are given to both games as `TT_COOP_*` switches, whatever each player's ini says (Easy against Expert parts the games
+within a minute: `../NETPLAY.md`); and the host's files the game reads -- its saves (`saves/UDATA/45410010/`) and the
+extra heroes' records (`heroes/records.dat`, which player 2 as Gandalf, Boromir... is played from) -- are sent to
+the guest when it arrives, through the match server (`saves.js`, `lobby.js`). The guest's game runs on that copy in
+`tt-games/<code>/` (`TT_WEB_HOME`), its own saves untouched; afterwards "Keep the saves from this game" copies them
+into its own. Both pages fingerprint the settings, the build (`build-id.txt`, made by `site.mjs`) and the files; the
+guest starts only on the host's fingerprint, and both are told if they differ. "Your saves" on the splash downloads
+them as a `.zip` (saves, the title's data, the extra heroes' records and the settings) or imports one (from here, or
+an Xbox save folder `45410010/...` zipped).
+
 **With the switches in the address** (the test tools, and `serve.mjs`): both players open the same address, e.g.
 `http://localhost:8080/?match=night1&TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1&TT_COOP=clone&TT_COOP_P2CHAR=legolas`.
 The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at a deployed
@@ -120,6 +132,7 @@ node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless C
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
 node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
 node web/tools/together-check.mjs OUT [URL] [ISO]                       # make, share, join and reload a game, as players do
+node web/tools/saves-check.mjs OUT [URL] ISO                            # a shared game's saves: the copy, keep, .zip, a refused copy
 node web/tools/coop-suite.mjs [--only a,b] [--save DIR] [KEY=VALUE ...] # upstream's co-op bot suite in the browser
 # --gpu on either: use the machine's GPU (headless Chrome otherwise draws WebGL in software)
 ```

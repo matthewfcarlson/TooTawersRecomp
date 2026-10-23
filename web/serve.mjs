@@ -108,9 +108,11 @@ function icase(p, root = disc) {
 
 http.createServer((req, res) => {
   res.on('finish', () => { if (res.statusCode >= 400) console.log(`${res.statusCode} ${req.method} ${req.url}`); });
-  const url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
+  let url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
+  // the game asks for its files beside its script, build/ (disc, ultra, bot): the same as at the root
+  if (url.startsWith('/build/') && !/^\/build\/twotowers_recomp\./.test(url)) url = url.slice('/build'.length);
   if (url === '/' || url === '/index.html') return sendFile(req, res, path.join(repo, 'web', 'index.html'));
-  if (['/netplay.js', '/lobby.js', '/import.js', '/import-worker.js'].includes(url)) return sendFile(req, res, path.join(repo, 'web', url.slice(1)));
+  if (['/netplay.js', '/lobby.js', '/saves.js', '/import.js', '/import-worker.js'].includes(url)) return sendFile(req, res, path.join(repo, 'web', url.slice(1)));
   // the port's own files for the Ultra textures' build in the browser (import.js), as the hosted site has them
   if (url === '/ultra-support.txt') return send(res, 200, { 'Content-Type': 'text/plain' }, ultraSupport().join('\n') + '\n');
   if (url.startsWith('/ultra-support/') && ultraSupport().includes(url.slice('/ultra-support/'.length)))

@@ -27,6 +27,10 @@
 // take, and its two players' ids, for a week. Without one (an address with
 // the switches in it, the test tools), the first in is the host, as before.
 //
+// The players' pages also send each other the host's save files for a
+// shared game ({type:"saves-want"|"saves-part"|"saves-ok"|"saves-bad"},
+// lobby.js): relayed like any other message.
+//
 // Inside a match (JSON text messages, binary relayed as is):
 //   server -> client  {type:"welcome", role:"host"|"guest", peer:bool, settings}
 //                     {type:"replaced"}   the same player connected again elsewhere
@@ -179,7 +183,11 @@ export class Match extends DurableObject {
       const st = body?.settings;
       if (!PLAYER.test(body?.player || "") || !st || !LEVEL.test(st.level) || !HEROES.test(st.p1) || !HEROES.test(st.p2))
         return Response.json({ error: "bad game settings" }, { status: 400 });
-      const settings = { level: st.level, p1: st.p1, p2: st.p2 };
+      // the co-op settings that change the game (options.c: difficulty 0-2, player 2's teleport, double pickups):
+      // the host's, for both games (each player's own ini would make two different games)
+      const flag = (v, max, def) => (Number.isInteger(v) && v >= 0 && v <= max ? v : def);
+      const settings = { level: st.level, p1: st.p1, p2: st.p2,
+                         difficulty: flag(st.difficulty, 2, 1), teleport: flag(st.teleport, 1, 1), pickups: flag(st.pickups, 1, 1) };
       await this.ctx.storage.put("game", { settings, host: body.player, guest: null, created: Date.now() });
       await this.ctx.storage.setAlarm(Date.now() + WEEK);
       return Response.json({ ok: true, settings }, { status: 201 });

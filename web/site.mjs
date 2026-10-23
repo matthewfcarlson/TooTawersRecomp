@@ -33,11 +33,13 @@ fs.mkdirSync(path.join(out, 'ultra-support', 'masks'), { recursive: true });
 fs.mkdirSync(path.join(out, 'build'));
 
 const copy = (from, to) => fs.copyFileSync(from, path.join(out, to));
-for (const f of ['index.html', 'netplay.js', 'lobby.js', 'import.js', 'import-worker.js']) copy(path.join(repo, 'web', f), f);
+for (const f of ['index.html', 'netplay.js', 'lobby.js', 'saves.js', 'import.js', 'import-worker.js']) copy(path.join(repo, 'web', f), f);
 for (const f of ['twotowers_recomp.js', 'twotowers_recomp.wasm']) {
   if (!fs.existsSync(path.join(build, f))) { console.error(`no ${f} in ${build}: build first (web/build.sh)`); process.exit(1); }
   copy(path.join(build, f), `build/${f}`);
 }
+// the build's id: a shared game's two pages must run the same build (lobby.js puts it in their fingerprint)
+fs.writeFileSync(path.join(out, 'build-id.txt'), crypto.createHash('sha256').update(fs.readFileSync(path.join(out, 'build', 'twotowers_recomp.wasm'))).digest('hex').slice(0, 16) + '\n');
 const src = path.join(repo, 'twotowers', 'tools', 'ultra_textures');
 const support = ['recipe.txt', 'pairs.txt', ...fs.readdirSync(path.join(src, 'masks')).filter((n) => n.endsWith('.png')).map((n) => `masks/${n}`)];
 for (const f of support) copy(path.join(src, f), `ultra-support/${f}`);

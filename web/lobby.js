@@ -8,6 +8,16 @@
 // (localStorage), so a reload, or the link opened again, gets the same role
 // back; netplay.js then restarts the level on both machines together.
 //
+// One game, one set of what changes it: the host's. The co-op settings
+// (difficulty, player 2's teleport, double pickups) travel with the game and
+// are given to both games (TT_COOP_*), whatever each player's ini says; the
+// host's files the game reads (saves.js: its saves and the extra heroes'
+// records) are sent to the guest when it arrives ({type:"saves-part"},
+// through the match server), and the guest's game runs on that copy in
+// tt-games/<code>/ -- its own saves are left alone; "Keep" copies the game's
+// into them afterwards. Both pages fingerprint the settings, the build and the
+// files, and the guest starts only on the host's fingerprint.
+//
 // An address that brings its own switches (TT_TWEAKS, TT_COOP...: the test
 // tools, older links) keeps them: the server's settings only fill what is
 // missing.
@@ -27,7 +37,8 @@
   const HEROES = ['aragorn', 'legolas', 'gimli', 'isildur', 'gandalf', 'boromir', 'frodo'];
   const name = (h) => h[0].toUpperCase() + h.slice(1);
   const levelName = (c) => (LEVELS.find(([k]) => k === c) || [c, c])[1];
-  const describe = (st) => `${name(st.p1)} & ${name(st.p2)} · ${levelName(st.level)}`;
+  const DIFFICULTY = ['Easy', 'Normal', 'Expert'];
+  const describe = (st) => `${name(st.p1)} & ${name(st.p2)} · ${levelName(st.level)} · ${DIFFICULTY[st.difficulty ?? 1]}`;
 
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -63,9 +74,11 @@
     fill($('together-level'), LEVELS, '01WEAT1');
     fill($('together-p1'), HEROES.map((h) => [h, name(h)]), 'aragorn');
     fill($('together-p2'), HEROES.map((h) => [h, name(h)]), 'legolas');
+    fill($('together-difficulty'), DIFFICULTY.map((d, i) => [String(i), d]), '1');
     $('together-create').onclick = async () => {
       const err = $('together-error'); err.textContent = '';
-      const settings = { level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value };
+      const settings = { level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
+                         difficulty: +$('together-difficulty').value, teleport: +$('together-teleport').checked, pickups: +$('together-pickups').checked };
       $('together-create').disabled = true;
       try {
         for (let tries = 0; tries < 5; tries++) {
@@ -114,11 +127,7 @@
       $('together-share').onclick = () => navigator.share({ title: 'The Two Towers', text: 'Play The Two Towers with me', url: link(code) }).catch(() => {});
     }
     $('together-leave').href = location.pathname;
-    let st = null;
-    try {
-      const r = await fetch(`${base}/match/${encodeURIComponent(code)}`, { cache: 'no-store' });
-      if (r.ok) st = (await r.json()).settings;
-    } catch {}
+    const st = await settingsP;
     const args = self.ttArgs;
     if (st) {
       settingsKnown = st;
@@ -126,6 +135,11 @@
       args.TT_TWEAKS ??= `SKIPMAINMENU=1;HERO=${st.p1};LEVEL=${st.level}`;
       args.TT_COOP ??= 'clone';
       args.TT_COOP_P2CHAR ??= st.p2;
+      // the host's co-op settings, not this player's ini; player 2 is the friend, never the bot
+      args.TT_COOP_DIFFICULTY ??= String(st.difficulty ?? 1);
+      args.TT_COOP_TELEPORT ??= String(st.teleport ?? 1);
+      args.TT_COOP_PICKUPS ??= String(st.pickups ?? 1);
+      args.TT_COOP_P2BOT = '0';
       $('together-what').textContent = describe(st);
     } else if (args.TT_TWEAKS || args.TT_COOP) {
       $('together-what').textContent = 'the settings in this address';
@@ -138,5 +152,115 @@
     }
   }
 
-  self.ttLobby = { ready: (code ? game() : Promise.resolve(lobby())).then(() => true, () => false) };
+  // ---- the host's files for the guest, and the check that both start the same game ----
+  let gateOpen;
+  const gate = new Promise((r) => (gateOpen = r));   // (import.js waits on it before the game starts)
+  const listen = (type, fn) => ((self.ttNetListeners ??= {})[type] ??= []).push(fn);
+  const CHUNK = 192 * 1024;   // (base64 characters a message: well under the server's 1 MiB)
+  const b64 = async (blob) => { const b = new Uint8Array(await blob.arrayBuffer()); let s = ''; for (let i = 0; i < b.length; i += 32768) s += String.fromCharCode(...b.subarray(i, i + 32768)); return btoa(s); };
+  const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  const say = (t, bad) => { const el = $('together-files'); el.textContent = t; el.className = bad ? 'bad' : ''; };
+
+  // (listening from the start: the server's welcome can come before the settings)
+  const settingsP = code ? fetch(`${base}/match/${encodeURIComponent(code)}`, { cache: 'no-store' })
+    .then((r) => (r.ok ? r.json() : null)).then((j) => j?.settings ?? null).catch(() => null) : Promise.resolve(null);
+  if (code) shareFiles();
+  function shareFiles() {
+    const build = fetch('build-id.txt', { cache: 'no-store' }).then((r) => (r.ok ? r.text() : '')).catch(() => '');
+    let mine = null, parts = [], role = null;
+    listen('welcome', async (m) => {
+      const st = await settingsP;
+      if (!st) return;   // (an address with its own switches: no shared files)
+      role = m.role;
+      if (role === 'host') {   // the host plays on its own files; the guest gets them
+        const files = await ttSaves.shared('tt');
+        mine = { files, fp: await ttSaves.fingerprint(files, st, (await build).trim()) };
+        if (wanted) sendFiles();
+        say(`Your saves go to your friend when they join (${ttSaves.saveCount(files)} save${ttSaves.saveCount(files) === 1 ? '' : 's'}).`);
+        gateOpen();
+      } else {
+        self.ttArgs.TT_WEB_HOME = `/opfs/tt-games/${code}`;
+        say('Waiting for the host’s saves (they arrive when the host has the game open)…');
+        if (m.peer) ttNetSend({ type: 'saves-want' });
+      }
+    });
+    listen('peer-joined', () => { if (role === 'guest' && !mine) ttNetSend({ type: 'saves-want' }); });
+    let wanted = false;
+    listen('saves-want', () => { wanted = true; if (role === 'host' && mine) sendFiles(); });
+    async function sendFiles() {
+      const data = await b64(ttSaves.zip(mine.files)), n = Math.max(1, Math.ceil(data.length / CHUNK));
+      for (let i = 0; i < n; i++) ttNetSend({ type: 'saves-part', fp: mine.fp, i, n, data: data.slice(i * CHUNK, (i + 1) * CHUNK) });
+    }
+    listen('saves-part', async (m) => {
+      if (role !== 'guest' || mine) return;
+      parts[m.i] = m.data;
+      if (parts.filter((x) => x != null).length !== m.n) return;
+      const zipped = unb64(parts.join('')); parts = [];
+      const home = `tt-games/${code}`;
+      const files = (await ttSaves.unzip(zipped)).filter((f) => ttSaves.SHARED(f.name.toLowerCase()));
+      await ttSaves.setShared(home, files);
+      await ttSaves.copyFile('tt', home, 'twotowers_recomp.ini');   // (this player's own display and keys)
+      const back = await ttSaves.shared(home), fp = await ttSaves.fingerprint(back, await settingsP, (await build).trim());
+      if (fp !== m.fp) {
+        ttNetSend({ type: 'saves-bad', fp });
+        say('Your game and the host’s would not be the same (the saves or the game’s version differ): reload both pages.', true);
+        return;
+      }
+      mine = { files: back, fp };
+      ttNetSend({ type: 'saves-ok', fp });
+      const n = ttSaves.saveCount(back);
+      say(`You have the host’s saves (${n} save${n === 1 ? '' : 's'}) ✓ · fingerprint ${fp.slice(0, 8)}`);
+      gateOpen();
+    });
+    listen('saves-ok', (m) => { if (role === 'host') say(m.fp === mine?.fp ? `Your friend has your saves ✓ · fingerprint ${m.fp.slice(0, 8)}` : 'Your friend’s copy differs: reload both pages.', m.fp !== mine?.fp); });
+    listen('saves-bad', () => { if (role === 'host') say('Your friend’s game would not be the same as yours (the game’s version may differ): reload both pages.', true); });
+  }
+
+  // ---- the guest's "keep": the shared game's saves into the player's own ----
+  async function offerKeep() {
+    const files = await ttSaves.shared(`tt-games/${code}`).catch(() => []);
+    const n = ttSaves.saveCount(files);
+    if (!n) return;
+    $('together-keep').hidden = false;
+    $('together-keep').textContent = `Keep the saves from this game (${n})`;
+    $('together-keep').onclick = async () => {
+      try {
+        const k = await ttSaves.keep(`tt-games/${code}`, (c) => confirm(`${c} of your own save files would be replaced by this game's. Go on?`));
+        if (k) $('together-keep').textContent = `Kept ✓ (${k} save${k === 1 ? '' : 's'})`;
+      } catch (e) { $('together-error').textContent = `Could not keep the saves: ${e.message}`; }
+    };
+  }
+
+  // ---- the player's own saves: a .zip out, a .zip in ----
+  async function savesRow() {
+    const files = await ttSaves.shared('tt').catch(() => []), n = ttSaves.saveCount(files);
+    $('saves-state').textContent = n ? `${n} save${n === 1 ? '' : 's'} in this browser` : 'no saves in this browser yet';
+  }
+  $('saves-download').onclick = async () => {
+    $('saves-error').textContent = '';
+    try { await ttSaves.download(); } catch (e) { $('saves-error').textContent = e.message; }
+  };
+  $('saves-import').onchange = async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    $('saves-error').textContent = '';
+    try {
+      const k = await ttSaves.import(f, (c) => confirm(`${c} of your files would be replaced by the ones in ${f.name}. Go on?`));
+      if (k) $('saves-state').textContent = `imported ${k} file${k === 1 ? '' : 's'} ✓`;
+    } catch (err) { $('saves-error').textContent = `Could not import ${f.name}: ${err.message}`; }
+  };
+
+  // old shared games' copies go when they leave the recent list
+  (async () => {
+    try {
+      const keep = new Set(store.get('tt-games', []).map((g) => g.code).concat(code ? [code] : []));
+      const d = await (await navigator.storage.getDirectory()).getDirectoryHandle('tt-games');
+      for await (const [n] of d.entries()) if (!keep.has(n)) await d.removeEntry(n, { recursive: true }).catch(() => {});
+    } catch {}
+  })();
+
+  const ready = (code ? game() : Promise.resolve(lobby())).then(() => true, () => false);
+  ready.then((ok) => { if (!ok || !settingsKnown) gateOpen(); else offerKeep(); });   // (no shared game: nothing to wait for)
+  savesRow();
+  self.ttLobby = { ready, gate };
 })();

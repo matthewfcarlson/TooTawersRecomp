@@ -68,6 +68,10 @@
   async function startGame() {
     const what = $('setup-what');
     if (self.ttLobby && !(await self.ttLobby.ready)) return;   // (a shared game's link that leads nowhere)
+    if (self.ttLobby) {   // a shared game's guest: the host's saves first (lobby.js)
+      what.textContent = 'Getting the game ready (the host’s saves)…';
+      await self.ttLobby.gate;
+    }
     what.textContent = 'Checking your disc…';
     try { await unlockBuild(); }
     catch (e) { what.textContent = ''; $('setup-error').textContent = e.message; panel.hidden = false; await refresh(); return; }
