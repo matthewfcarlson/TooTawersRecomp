@@ -777,6 +777,13 @@ static void *thread_trampoline(void *arg)
     return NULL;
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/threading.h>
+/* (web port) canvases (CSS selectors) the next CreateThread hands to the new
+ * thread, for a WebGL context there: the GPU renderer's thread */
+const char *volatile w32_next_thread_canvases;
+#endif
+
 HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
                     LPTHREAD_START_ROUTINE start, LPVOID param,
                     DWORD flags, LPDWORD threadId)
@@ -795,6 +802,12 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
      * links with a 64 MB default stack, which every thread created with a
      * size of 0 inherits. Same here (address space only until touched). */
     pthread_attr_setstacksize(&attr, stackSize < 65536 ? (64u << 20) : stackSize);
+#if defined(__EMSCRIPTEN__)
+    if (w32_next_thread_canvases) {
+        emscripten_pthread_attr_settransferredcanvases(&attr, w32_next_thread_canvases);
+        w32_next_thread_canvases = NULL;
+    }
+#endif
 
     if (pthread_create(&o->thread, &attr, thread_trampoline, o) != 0) {
         pthread_attr_destroy(&attr);

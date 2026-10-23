@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-let warmup = 40, seconds = 15, top = 30, out = null, url = 'http://localhost:8080/';
+let warmup = 40, seconds = 15, top = 30, out = null, url = 'http://localhost:8080/', gpu = false;
 const query = new URLSearchParams();
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -24,6 +24,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--top') top = Number(argv[++i]);
   else if (a === '--out') out = path.resolve(argv[++i]);
   else if (a === '--url') url = argv[++i];
+  else if (a === '--gpu') gpu = true;
   else if (a.includes('=')) query.append(a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1));
 }
 out ??= fs.mkdtempSync(path.join(os.tmpdir(), 'tt-profile-'));
@@ -43,7 +44,8 @@ function cachedChromium() {
 }
 
 const ctx = await chromium.launchPersistentContext(path.join(out, 'profile-dir'), {
-  executablePath: cachedChromium(), headless: true, viewport: { width: 1000, height: 1100 } });
+  executablePath: cachedChromium(), headless: true, viewport: { width: 1000, height: 1100 },
+  args: gpu ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=' + (process.platform === 'darwin' ? 'metal' : 'default')] : [] });
 const page = ctx.pages()[0] ?? await ctx.newPage();
 const cdp = await ctx.newCDPSession(page);
 

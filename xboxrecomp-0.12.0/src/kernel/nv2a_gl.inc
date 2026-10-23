@@ -223,11 +223,227 @@ static void (APIENTRY *p_glMaxShaderCompilerThreadsKHR)(GLuint);
 #define glRenderbufferStorageMultisample p_glRenderbufferStorageMultisample
 #define glFramebufferRenderbuffer p_glFramebufferRenderbuffer
 
+#if defined(__EMSCRIPTEN__)
+/* (web port) WebGL2 under the same renderer.
+ *
+ * The page's canvas is handed to the render thread when it starts
+ * (nv2a_pb_scan.c), which makes a WebGL2 context on it here; there is no SDL
+ * window. WebGL2 is OpenGL ES 3.0, which is close to the 3.3 core this file
+ * targets; the differences are bridged below, under the same gl* names, so
+ * the rest of the file is unchanged:
+ *   - BGRA uploads and readbacks (GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV)
+ *     swizzled to RGBA bytes on the CPU, row lengths honoured;
+ *   - glMapBufferRange (WebGL has none; Emscripten's refuses UNSYNCHRONIZED)
+ *     as a scratch copy written with glBufferSubData at glUnmapBuffer;
+ *   - glDrawBuffer as glDrawBuffers, glClearDepth as glClearDepthf;
+ *   - no GL_DEPTH_CLAMP, and GL_CLAMP_TO_BORDER as GL_CLAMP_TO_EDGE (no
+ *     border colours);
+ *   - glDrawElementsBaseVertex only with base 0 (the call site re-points the
+ *     attributes instead);
+ *   - GLSL 330 core as GLSL ES 3.00 (glShaderSource rewrites the #version);
+ *   - presenting: a frame shows when the render thread returns to its event
+ *     loop, which it does after each SDL_GL_SwapWindow (g_web_presents). */
+#include <emscripten/html5.h>
+extern void emscripten_glDrawBuffers(GLsizei n, const GLenum *bufs);
+extern void emscripten_glDrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices);
+extern void emscripten_glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size, const void *data);
+extern void emscripten_glClearDepthf(GLfloat d);
+
+static EMSCRIPTEN_WEBGL_CONTEXT_HANDLE s_webgl;
+volatile unsigned g_web_presents;
+static GLint s_unpack_row, s_pack_row;
+
+static void *web_scratch(size_t n)
+{
+    static void *p; static size_t cap;
+    if (n > cap) { free(p); cap = n + n / 2; p = malloc(cap); if (!p) cap = 0; }
+    return p;
+}
+/* rows of BGRA words (bytes B, G, R, A) to tight RGBA bytes */
+static void web_swizzle(uint8_t *dst, const uint8_t *src, GLsizei w, GLsizei h, size_t src_stride, size_t dst_stride)
+{
+    GLsizei x, y;
+    for (y = 0; y < h; y++) {
+        const uint8_t *s = src + (size_t)y * src_stride;
+        uint8_t *d = dst + (size_t)y * dst_stride;
+        for (x = 0; x < w; x++, s += 4, d += 4) { uint8_t b = s[0]; d[0] = s[2]; d[1] = s[1]; d[2] = b; d[3] = s[3]; }
+    }
+}
+static void web_PixelStorei(GLenum pname, GLint v)
+{
+    if (pname == GL_UNPACK_ROW_LENGTH) s_unpack_row = v;
+    else if (pname == GL_PACK_ROW_LENGTH) s_pack_row = v;
+    p_glPixelStorei(pname, v);
+}
+static const void *web_upload_rgba(const void *data, GLsizei w, GLsizei h)
+{
+    uint8_t *t = (uint8_t *)web_scratch((size_t)w * h * 4);
+    if (!t) return NULL;
+    web_swizzle(t, (const uint8_t *)data, w, h, (size_t)(s_unpack_row ? s_unpack_row : w) * 4, (size_t)w * 4);
+    return t;
+}
+static void web_TexImage2D(GLenum tg, GLint lv, GLint ifmt, GLsizei w, GLsizei h, GLint bd, GLenum fmt, GLenum ty, const void *d)
+{
+    if (fmt == GL_BGRA) {
+        fmt = GL_RGBA; ty = GL_UNSIGNED_BYTE;
+        if (d) {
+            d = web_upload_rgba(d, w, h);
+            p_glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+            p_glTexImage2D(tg, lv, ifmt, w, h, bd, fmt, ty, d);
+            p_glPixelStorei(GL_UNPACK_ROW_LENGTH, s_unpack_row);
+            return;
+        }
+    }
+    p_glTexImage2D(tg, lv, ifmt, w, h, bd, fmt, ty, d);
+}
+static void web_TexSubImage2D(GLenum tg, GLint lv, GLint x, GLint y, GLsizei w, GLsizei h, GLenum fmt, GLenum ty, const void *d)
+{
+    if (fmt == GL_BGRA && d) {
+        d = web_upload_rgba(d, w, h);
+        p_glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        p_glTexSubImage2D(tg, lv, x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, d);
+        p_glPixelStorei(GL_UNPACK_ROW_LENGTH, s_unpack_row);
+        return;
+    }
+    p_glTexSubImage2D(tg, lv, x, y, w, h, fmt, ty, d);
+}
+static void web_ReadPixels(GLint x, GLint y, GLsizei w, GLsizei h, GLenum fmt, GLenum ty, void *d)
+{
+    if (fmt == GL_BGRA) {
+        uint8_t *t = (uint8_t *)web_scratch((size_t)w * h * 4);
+        if (!t) return;
+        p_glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+        p_glReadPixels(x, y, w, h, GL_RGBA, GL_UNSIGNED_BYTE, t);
+        p_glPixelStorei(GL_PACK_ROW_LENGTH, s_pack_row);
+        web_swizzle((uint8_t *)d, t, w, h, (size_t)w * 4, (size_t)(s_pack_row ? s_pack_row : w) * 4);   /* (the same swap back) */
+        return;
+    }
+    p_glReadPixels(x, y, w, h, fmt, ty, d);
+}
+static struct { GLenum target; GLintptr at; GLsizeiptr len; void *p; } s_web_map;
+static void *web_MapBufferRange(GLenum target, GLintptr at, GLsizeiptr len, GLbitfield access)
+{
+    (void)access;
+    s_web_map.target = target; s_web_map.at = at; s_web_map.len = len;
+    s_web_map.p = web_scratch((size_t)len);
+    return s_web_map.p;
+}
+static GLboolean web_UnmapBuffer(GLenum target)
+{
+    if (s_web_map.p && s_web_map.target == target) emscripten_glBufferSubData(target, s_web_map.at, s_web_map.len, s_web_map.p);
+    s_web_map.p = NULL;
+    return GL_TRUE;
+}
+static void web_DrawBuffer(GLenum b) { emscripten_glDrawBuffers(1, &b); }
+static void web_ClearDepth(GLdouble z) { emscripten_glClearDepthf((GLfloat)z); }
+static void web_Enable(GLenum cap) { if (cap != GL_DEPTH_CLAMP) p_glEnable(cap); }
+static void web_Disable(GLenum cap) { if (cap != GL_DEPTH_CLAMP) p_glDisable(cap); }
+static void web_SamplerParameteri(GLuint smp, GLenum pname, GLint v) { p_glSamplerParameteri(smp, pname, v == GL_CLAMP_TO_BORDER ? GL_CLAMP_TO_EDGE : v); }
+static void web_TexParameteri(GLenum tg, GLenum pname, GLint v) { p_glTexParameteri(tg, pname, v == GL_CLAMP_TO_BORDER ? GL_CLAMP_TO_EDGE : v); }
+static void web_DrawElementsBaseVertex(GLenum mode, GLsizei n, GLenum ty, const void *idx, GLint base)
+{
+    static int said;
+    if (base != 0 && said++ < 4) fprintf(stderr, "  [GL] base vertex %d: not in WebGL2 (re-point the attributes at the call site)\n", base);
+    emscripten_glDrawElements(mode, n, ty, idx);
+}
+static void web_ShaderSource(GLuint sh, GLsizei n, const GLchar *const *src, const GLint *len)
+{
+    static const char desk[] = "#version 330 core\n";
+    static const char es[] = "#version 300 es\nprecision highp float;\nprecision highp int;\nprecision highp sampler2D;\n";
+    const GLchar *v[8];
+    GLsizei i;
+    /* (strings with lengths are passed through untouched: Emscripten's
+     * memory64 build reads that array with a pointer's stride, so this file
+     * passes none, and the rewrite keeps it that way) */
+    if (n > 8 || len) { p_glShaderSource(sh, n, src, len); return; }
+    for (i = 0; i < n; i++) {
+        v[i] = src[i];
+        if (i == 0 && !strncmp(src[0], desk, sizeof desk - 1)) {
+            static char buf[1 << 16];   /* (the render thread is the only caller) */
+            size_t rest = strlen(src[0] + sizeof desk - 1);
+            if (sizeof es - 1 + rest < sizeof buf) {
+                memcpy(buf, es, sizeof es - 1);
+                memcpy(buf + sizeof es - 1, src[0] + sizeof desk - 1, rest + 1);
+                v[0] = buf;
+            }
+        }
+    }
+    p_glShaderSource(sh, n, v, NULL);
+}
+#undef glPixelStorei
+#define glPixelStorei web_PixelStorei
+#undef glTexImage2D
+#define glTexImage2D web_TexImage2D
+#undef glTexSubImage2D
+#define glTexSubImage2D web_TexSubImage2D
+#undef glReadPixels
+#define glReadPixels web_ReadPixels
+#undef glMapBufferRange
+#define glMapBufferRange web_MapBufferRange
+#undef glUnmapBuffer
+#define glUnmapBuffer web_UnmapBuffer
+#undef glDrawBuffer
+#define glDrawBuffer web_DrawBuffer
+#undef glClearDepth
+#define glClearDepth web_ClearDepth
+#undef glEnable
+#define glEnable web_Enable
+#undef glDisable
+#define glDisable web_Disable
+#undef glSamplerParameteri
+#define glSamplerParameteri web_SamplerParameteri
+#undef glTexParameteri
+#define glTexParameteri web_TexParameteri
+#undef glDrawElementsBaseVertex
+#define glDrawElementsBaseVertex web_DrawElementsBaseVertex
+#undef glShaderSource
+#define glShaderSource web_ShaderSource
+
+/* the context, on the page's canvas (this thread owns it) */
+static void *web_gl_context(void)
+{
+    EmscriptenWebGLContextAttributes a;
+    const char *sz = getenv("TT_WEB_SIZE");   /* the canvas in pixels, e.g. 1920x1440 (default 1280x960) */
+    int w = 1280, h = 960;
+    if (sz) sscanf(sz, "%dx%d", &w, &h);
+    emscripten_webgl_init_context_attributes(&a);
+    a.majorVersion = 2; a.minorVersion = 0;
+    a.alpha = 0; a.depth = 0; a.stencil = 0; a.antialias = 0;
+    a.preserveDrawingBuffer = 0;
+    a.powerPreference = EM_WEBGL_POWER_PREFERENCE_HIGH_PERFORMANCE;
+    a.enableExtensionsByDefault = 1;
+    emscripten_set_canvas_element_size("#screen", w, h);
+    s_webgl = emscripten_webgl_create_context("#screen", &a);
+    if (s_webgl <= 0) { fprintf(stderr, "  [GL] no WebGL2 context on #screen (%d)\n", (int)s_webgl); return NULL; }
+    return (void *)(intptr_t)s_webgl;
+}
+#define SDL_GL_GetProcAddress(n) emscripten_webgl_get_proc_address(n)
+#define SDL_GL_MakeCurrent(w, c) (emscripten_webgl_make_context_current((c) ? s_webgl : 0) == EMSCRIPTEN_RESULT_SUCCESS ? 0 : -1)
+#define SDL_GetError() "WebGL"
+#define SDL_GetWindowFlags(w) 0u
+#define SDL_GL_GetDrawableSize(w, pw, ph) emscripten_get_canvas_element_size("#screen", (pw), (ph))
+#define SDL_GL_SetSwapInterval(i) 0
+#define SDL_GL_SwapWindow(w) web_present_done()
+static void web_present_done(void)
+{
+    g_web_presents++;
+    if (g_web_presents % 30 == 0)   /* the page's frame counter */
+        MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttFrames) Module.ttFrames(30); });
+}
+#endif
+
 static int gl_load(void)
 {
+#if defined(__EMSCRIPTEN__)
+    /* (web port) the few WebGL lacks are bridged above */
+#define GLX_LOAD(ret, name, args) \
+    if (!(*(void **)&p_gl##name = SDL_GL_GetProcAddress("gl" #name))) \
+        fprintf(stderr, "  [GL] WebGL2 has no gl" #name " (bridged)\n");
+#else
 #define GLX_LOAD(ret, name, args) \
     if (!(*(void **)&p_gl##name = SDL_GL_GetProcAddress("gl" #name))) { \
         fprintf(stderr, "  [GL] the driver lacks gl" #name "\n"); return 0; }
+#endif
     GLFUNCS(GLX_LOAD)
 #undef GLX_LOAD
     return 1;
@@ -347,6 +563,19 @@ static uint32_t gpu_ring(GRing *r, const void *data, uint32_t bytes, uint32_t al
 {
     uint32_t at;
     void *p;
+#if defined(__EMSCRIPTEN__)
+    /* (web port) WebGL cannot write a buffer the GPU may still read without
+     * waiting for it (no unsynchronized mapping): every bufferSubData into
+     * the shared ring stalled or copied it, and a level fell below 1 frame/s.
+     * Each upload is a fresh store instead (orphaning), at offset 0 -- so a
+     * ring must not be uploaded to twice before the draw that reads it
+     * (uniform blocks: one ring per binding point, gpu_ub). */
+    (void)at; (void)p; (void)align;
+    if (!r->buf) glGenBuffers(1, &r->buf);
+    glBindBuffer(r->target, r->buf);
+    glBufferData(r->target, bytes, data, GL_STREAM_DRAW);
+    return 0;
+#endif
     if (!r->buf || r->cap < bytes) {
         if (!r->buf) glGenBuffers(1, &r->buf);
         r->cap = bytes < (8u << 20) ? (8u << 20) : bytes * 2;
@@ -371,6 +600,15 @@ static uint32_t gpu_ring(GRing *r, const void *data, uint32_t bytes, uint32_t al
 /* a uniform block's data, bound at its binding point */
 static void gpu_ub(int binding, const void *data, uint32_t bytes)
 {
+#if defined(__EMSCRIPTEN__)
+    /* (web port) one buffer per binding point (see gpu_ring) */
+    static GRing per[8];
+    GRing *r = (binding >= 0 && binding < 8) ? &per[binding] : &g_rub;
+    r->target = GL_UNIFORM_BUFFER;
+    gpu_ring(r, data, bytes, 0);
+    glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)binding, r->buf, 0, bytes);
+    return;
+#endif
     uint32_t at = gpu_ring(&g_rub, data, bytes, (uint32_t)g_ubo_align);
     if (at != 0xFFFFFFFFu) glBindBufferRange(GL_UNIFORM_BUFFER, (GLuint)binding, g_rub.buf, at, bytes);
 }
@@ -1442,8 +1680,13 @@ static int gpu_init(void)
     const char *e = getenv("RECOMP_RENDERER");
     GLint maj = 0, mnr = 0;
     if (e && !strcasecmp(e, "software")) return 0;
+#if defined(__EMSCRIPTEN__)
+    g_glc = (SDL_GLContext)web_gl_context();
+    g_win = (SDL_Window *)&s_webgl;   /* (no SDL window: anything not null) */
+#else
     g_glc = (SDL_GLContext)xbox_FramebufferGLContext(10000);
     g_win = (SDL_Window *)xbox_FramebufferHwnd();
+#endif
     if (!g_win || !g_glc) {
         fprintf(stderr, "  [GL] no OpenGL 3.3 context; using the software renderer\n");
         return 0;
@@ -1457,7 +1700,11 @@ static int gpu_init(void)
     glGetIntegerv(GL_MINOR_VERSION, &mnr);
     fprintf(stderr, "  [GL] %s / %s / OpenGL %s\n", (const char *)glGetString(GL_VENDOR),
             (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION));
+#if defined(__EMSCRIPTEN__)
+    if (maj < 3) {   /* (web port) WebGL2 is OpenGL ES 3.0 */
+#else
     if (maj < 3 || (maj == 3 && mnr < 3)) {
+#endif
         fprintf(stderr, "  [GL] OpenGL 3.3 is needed; using the software renderer\n");
         SDL_GL_MakeCurrent(g_win, NULL);
         return 0;
@@ -2687,6 +2934,18 @@ cpu_verts_ready:
         gpu_bind_stages();
         gpu_set_blend(0);
         gpu_set_depth(g_cur_ds != NULL);
+#if defined(__EMSCRIPTEN__)
+        /* (web port) no base-vertex draws: the attributes point at this
+         * draw's vertices instead, set again for every draw */
+        glBindVertexArray(g_vao);
+        glBindBuffer(GL_ARRAY_BUFFER, g_rvb.buf);
+        for (i = 0; i < 8; i++) {
+            glEnableVertexAttribArray(i);
+            glVertexAttribPointer(i, 4, GL_FLOAT, GL_FALSE, sizeof(GVert), (const void *)(uintptr_t)(vb_at + 16 * i));
+        }
+        g_sh.vao = 1;   /* (so the block below leaves them) */
+        vb_at = 0;
+#endif
         if (g_sh.vao != 1) {
             /* the CPU path's vertex layout: 8 float4s (GVert) */
             glBindVertexArray(g_vao);
@@ -3128,7 +3387,15 @@ static void gpu_present(uint32_t base, uint32_t pitch)
     gpu_sh_reset();
     {
         static int said;
+#if defined(__EMSCRIPTEN__)
+        /* (web port) glGetError is a round trip in WebGL: it waits for the
+         * browser's GPU process to run everything queued (86% of the render
+         * thread in a level). The first frames, then one in 600. */
+        static unsigned fr;
+        GLenum err = (fr++ < 120 || fr % 600 == 0) ? glGetError() : GL_NO_ERROR;
+#else
         GLenum err = glGetError();
+#endif
         if (err != GL_NO_ERROR && said++ < 10) fprintf(stderr, "  [GL] error 0x%04X during the frame\n", err);
     }
 settings:

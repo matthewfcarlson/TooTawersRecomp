@@ -25,8 +25,11 @@ Any `KEY=VALUE` in the address's query is one of the game's switches, for exampl
 The server only listens on 127.0.0.1 and serves your disc to your own browser; it sends the cross-origin isolation
 headers threads need. Saves and settings stay in the browser's private storage for the page (OPFS).
 
-What works: the menus, the videos, the levels, the keyboard. What doesn't yet: sound (silent), controllers, speed
-(software rendering: about 30 frames/s in the menus, a few in a level).
+Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canvas handed to it):
+the levels run at the game's 30 frames/s. `?RECOMP_RENDERER=software` uses the CPU renderer instead (a few
+frames/s in a level), `?TT_WEB_SIZE=1920x1440` sets the canvas's resolution (default 1280x960).
+
+What works: the menus, the videos, the levels, the keyboard. What doesn't yet: sound (silent), controllers.
 
 ## Test it
 
@@ -34,6 +37,7 @@ What works: the menus, the videos, the levels, the keyboard. What doesn't yet: s
 node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same build under Node, no window; frames to BMP
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
+# --gpu on either: use the machine's GPU (headless Chrome otherwise draws WebGL in software)
 ```
 
 `browser-check.mjs` and `profile.mjs` need `npm install` in `web/tools` (playwright-core) and a Chromium from Playwright's cache

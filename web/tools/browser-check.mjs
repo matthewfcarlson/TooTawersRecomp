@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-let seconds = 40, out = null, url = 'http://localhost:8080/';
+let seconds = 40, out = null, url = 'http://localhost:8080/', gpu = false;
 const query = new URLSearchParams();
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -21,6 +21,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a === '--seconds') seconds = Number(argv[++i]);
   else if (a === '--out') out = path.resolve(argv[++i]);
   else if (a === '--url') url = argv[++i];
+  else if (a === '--gpu') gpu = true;
   else if (a.includes('=')) query.append(a.slice(0, a.indexOf('=')), a.slice(a.indexOf('=') + 1));
 }
 out ??= fs.mkdtempSync(path.join(os.tmpdir(), 'tt-browser-'));
@@ -46,7 +47,9 @@ function cachedChromium() {
 // a profile of its own on disk, like a real browser's: an incognito context
 // has a small storage quota, too small for the game's hard-disk images in OPFS
 const browser = await chromium.launchPersistentContext(path.join(out, 'profile'), {
-  executablePath: cachedChromium(), headless: true, viewport: { width: 1000, height: 1100 } });
+  executablePath: cachedChromium(), headless: true, viewport: { width: 1000, height: 1100 },
+  // --gpu: the machine's GPU (headless Chrome otherwise draws WebGL in software, SwiftShader)
+  args: gpu ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=' + (process.platform === 'darwin' ? 'metal' : 'default')] : [] });
 const page = browser.pages()[0] ?? await browser.newPage();
 const consoleLines = [];
 page.on('console', (m) => consoleLines.push(`[${m.type()}] ${m.text()}`));

@@ -188,9 +188,16 @@ if(EMSCRIPTEN)
     target_link_options(${PROJECT_NAME} PRIVATE
         -sMEMORY64=1 -pthread -sWASMFS=1
         -sPROXY_TO_PTHREAD=1 -sPTHREAD_POOL_SIZE=24
-        -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=256MB -sMAXIMUM_MEMORY=8GB
+        # fixed-size memory: WebGL refuses views of a growable (resizable)
+        # buffer, and the 4 GB guest arena is reserved up front anyway;
+        # untouched pages cost nothing
+        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=6GB
         -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=8MB
         -sENVIRONMENT=web,worker,node -sEXIT_RUNTIME=1
+        # WebGL2 on the GPU renderer's thread: the page's #screen canvas is
+        # handed to it (nv2a_pb_scan.c); main() gets a hidden one (#ttmain)
+        -sOFFSCREENCANVAS_SUPPORT=1 -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2
+        "-sOFFSCREENCANVASES_TO_PTHREAD=#ttmain"
         "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stringToNewUTF8"
         "--js-library=${CMAKE_CURRENT_SOURCE_DIR}/../web/opfs_fix.js"
         -sASSERTIONS=1 --profiling-funcs)

@@ -19,6 +19,7 @@
 </head>
 <body>
 <main>
+  <canvas id="ttmain" width="1" height="1" hidden></canvas>
   <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
   <div id="status">Loading…</div>
   <details>
@@ -36,7 +37,7 @@
   const statusEl = document.getElementById('status');
   const logEl = document.getElementById('log');
   const canvas = document.getElementById('screen');
-  const ctx = canvas.getContext('2d');
+  let ctx = null;   // (software renderer only: with WebGL the game's render thread owns the canvas)
   // the game prints a lot (thousands of lines a second while starting):
   // kept in memory, the panel redrawn a few times a second at most
   const lines = [];
@@ -62,24 +63,30 @@
   }
 
   // the game's switches: defaults, then the address's query
-  const args = { RECOMP_RENDERER: 'software' };
+  // (?RECOMP_RENDERER=software: the CPU renderer instead of WebGL2)
+  const args = {};
   for (const [k, v] of new URLSearchParams(location.search)) args[k] = v;
 
   let frames = 0, t0 = performance.now(), ended = false;
+  function countFrames(n) {
+    frames += n;
+    const now = performance.now();
+    if (now - t0 > 2000) {
+      status(`Running · ${(frames * 1000 / (now - t0)).toFixed(1)} frames/s`);
+      frames = 0; t0 = now;
+    }
+  }
   var Module = {
     arguments: Object.entries(args).map(([k, v]) => `${k}=${v}`),
     print: log,
     printErr: log,
-    ttDrawFrame(rgba, w, h) {
+    ttDrawFrame(rgba, w, h) {   // the software renderer's frames
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      ctx ??= canvas.getContext('2d');
       ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), w, h), 0, 0);
-      frames++;
-      const now = performance.now();
-      if (now - t0 > 2000) {
-        status(`Running · ${(frames * 1000 / (now - t0)).toFixed(1)} frames/s shown`);
-        frames = 0; t0 = now;
-      }
+      countFrames(1);
     },
+    ttFrames: countFrames,   // WebGL: frames presented, reported in batches
     onAbort(what) { ended = true; status('Stopped: ' + what, true); },
     onExit(code) { ended = true; status(`The game ended (code ${code}). Reload to start again.`, code !== 0); },
   };

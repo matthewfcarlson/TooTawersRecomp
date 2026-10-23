@@ -332,15 +332,37 @@ static int s_async = -1;
 static volatile LONG s_rt_sleeping, s_pb_waiting;   /* (1.9.3) events signalled only to a waiting thread */
 static int s_mark_pending;   /* a run began; its marker not yet in the ring */
 volatile long long g_perf_rt_ticks;   /* the render thread's time executing, for [PERF] */
+#if defined(__EMSCRIPTEN__)
+/* (web port) With WebGL the render thread owns the page's canvas, and a frame
+ * is shown only when the thread returns to its event loop: it runs until a
+ * frame has been presented (g_web_presents, nv2a_gl.inc), returns, and is
+ * called again at once. p is non-null in that mode. */
+#include <emscripten.h>
+#include <emscripten/eventloop.h>
+extern volatile unsigned g_web_presents;
+static DWORD WINAPI pb_render_thread(LPVOID p);
+static void pb_render_again(void *p) { pb_render_thread(p); }
+#endif
 static DWORD WINAPI pb_render_thread(LPVOID p)
 {
     extern void xbox_UnpinServiceThread(void);
+#if defined(__EMSCRIPTEN__)
+    unsigned presents0 = g_web_presents;
+    static int first = 1;
+    if (p && first) { first = 0; emscripten_runtime_keepalive_push(); }
+#endif
     (void)p;
     xbox_UnpinServiceThread();
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
     for (;;) {
         LONG h = s_ring_head, t = s_ring_tail, done = 0;
         LARGE_INTEGER a, b;
+#if defined(__EMSCRIPTEN__)
+        if (p && g_web_presents != presents0) {   /* (a frame drawn: let the page show it) */
+            emscripten_set_timeout(pb_render_again, 0, p);
+            return 0;
+        }
+#endif
         if (h == t) {
             InterlockedExchange(&s_rt_sleeping, 1);
             if (s_ring_tail == h) WaitForSingleObject(s_ring_wake, 2);
@@ -426,7 +448,20 @@ static int pb_async(void)
             s_ring = (uint32_t *)malloc((size_t)PB_RING * 8);
             s_ring_wake = CreateEventW(NULL, FALSE, FALSE, NULL);
             s_ring_space = CreateEventW(NULL, FALSE, FALSE, NULL);
+#if defined(__EMSCRIPTEN__)
+        {   /* (web port) WebGL: the page's canvas goes to the render thread */
+            extern const char *volatile w32_next_thread_canvases;
+            const char *r = getenv("RECOMP_RENDERER");
+            static int web_gl = 1;
+            if (getenv("TT_WEB_CANVAS") && !(r && !strcmp(r, "software"))) {
+                w32_next_thread_canvases = "#screen";
+                if (!s_ring || !s_ring_wake || !s_ring_space || !CreateThread(NULL, 0, pb_render_thread, &web_gl, 0, NULL)) s_async = 0;
+            } else
+#endif
             if (!s_ring || !s_ring_wake || !s_ring_space || !CreateThread(NULL, 0, pb_render_thread, NULL, 0, NULL)) s_async = 0;
+#if defined(__EMSCRIPTEN__)
+        }
+#endif
         }
         fprintf(stderr, "  [NV2A] GPU commands %s\n", s_async ? "recorded as kicked, executed on a render thread of their own" : "executed as kicked");
         fflush(stderr);
