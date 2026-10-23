@@ -23,7 +23,8 @@ Any `KEY=VALUE` in the address's query is one of the game's switches, for exampl
 `?TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1` to start in the first level.
 
 The server only listens on 127.0.0.1 and serves your disc to your own browser; it sends the cross-origin isolation
-headers threads need. Saves and settings stay in the browser's private storage for the page (OPFS).
+headers threads need. Saves and settings stay in the browser's private storage for the page (OPFS): the hard
+disk's E: (UDATA, TDATA) is mapped into the save folder there, since the game folder is the read-only disc.
 
 Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canvas handed to it):
 the levels run at the game's 30 frames/s. `?RECOMP_RENDERER=software` uses the CPU renderer instead (a few

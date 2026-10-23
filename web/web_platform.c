@@ -74,13 +74,6 @@ static void mount_disc(void)
         }
     }
     free(list);
-    {   /* The hard disk's save partition maps into the game folder (UDATA:
-         * saves, TDATA: the title's data), and the disc is read-only: those
-         * two in memory for now (lost on reload) */
-        backend_t m = wasmfs_create_memory_backend();
-        wasmfs_create_directory("/disc/UDATA", 0777, m);
-        wasmfs_create_directory("/disc/TDATA", 0777, m);
-    }
     setenv("TWOTOWERS_GAME_DIR", "/disc", 0);
     fprintf(stderr, "[WEB] disc: %d files, fetched as they are read\n", n);
 }

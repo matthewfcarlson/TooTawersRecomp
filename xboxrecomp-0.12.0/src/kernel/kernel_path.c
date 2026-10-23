@@ -734,6 +734,13 @@ BOOL xbox_translate_path(const char* xbox_path, xbox_host_char* host_path_buf, D
             remainder = xbox_path + skip;
             base_dir  = s_rules[i].to_save ? s_save_dir : s_game_dir;
             sub_dir   = s_rules[i].sub_posix;
+#if defined(__EMSCRIPTEN__)
+            /* (web port) the hard disk's E: (UDATA: saves, TDATA: the
+             * title's data) in the save folder, which the page keeps (OPFS):
+             * the game folder there is the read-only disc */
+            if (!strcmp(s_rules[i].prefix, "\\Device\\Harddisk0\\Partition1\\") && getenv("TT_WEB_CANVAS"))
+                base_dir = s_save_dir;
+#endif
             goto translate;
         }
     }
