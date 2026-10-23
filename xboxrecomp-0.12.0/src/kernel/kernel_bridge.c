@@ -462,6 +462,7 @@ static RECOMP_TLS uint32_t g_thread_stack_top = 0;
 struct bridge_thread_start {
     recomp_func_t fn;
     uint32_t ctx1, ctx2, stack_top;
+    uint32_t tib;   /* (netplay) allocated by the creator: see bridge_spawn_thread */
 };
 
 static void bridge_write_handle(uint32_t handle_va, HANDLE h);
@@ -493,7 +494,7 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
     g_esp = s->stack_top;
     g_thread_stack_top = s->stack_top;
     {
-        uint32_t tib = xbox_AllocThreadTib();
+        uint32_t tib = s->tib ? s->tib : xbox_AllocThreadTib();
         if (tib)
             g_fs_base = tib;
         else
@@ -521,6 +522,13 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
 
     if (!s) return NULL;
     s->fn = fn; s->ctx1 = ctx1; s->ctx2 = ctx2; s->stack_top = stack_top;
+    /* (netplay) The TIB from the guest heap here, in the creator, right after
+     * the stack -- not in the new thread as it starts, where it raced the
+     * creator's next allocations: two threads started back to back (Bink's)
+     * put theirs in either order, and everything the game allocated after
+     * sat 4 KB apart from one run to the next. Lockstep needs the same
+     * addresses on both machines. */
+    s->tib = xbox_AllocThreadTib();
 
     th = CreateThread(NULL, 0, bridge_thread_main, s, 0, NULL);
     if (th && getenv("RECOMP_GUEST_AFFINITY")) SetThreadAffinityMask(th, 1);
@@ -2623,13 +2631,12 @@ extern void xbox_CpuUnlock(void);
  * 6 DPCs, 7 timers. */
 volatile int g_timer_phase;
 volatile unsigned g_timer_loops;
-static DWORD WINAPI kernel_timer_thread(LPVOID unused)
+static DWORD WINAPI kernel_timer_thread(LPVOID pre_tib)
 {
     /* Vblank, timers and interrupts are the clock the title runs by; let
      * them preempt a busy guest thread on the shared core. */
     int slot = xbox_worker_stack_alloc();
 
-    (void)unused;
     if (slot < 0) {
         fprintf(stderr, "  [KERNEL] timer thread has no worker stack; "
                         "timer DPCs will not run\n");
@@ -2642,7 +2649,8 @@ static DWORD WINAPI kernel_timer_thread(LPVOID unused)
          * every worker: a DPC routine with an SEH prologue reads fs:[0],
          * and a thread whose g_fs_base is zero faults inside the runtime
          * before the routine runs. */
-        uint32_t tib = xbox_AllocThreadTib();
+        /* (netplay) allocated by the creator, in order (see bridge_spawn_thread) */
+        uint32_t tib = pre_tib ? (uint32_t)(uintptr_t)pre_tib : xbox_AllocThreadTib();
         if (!tib) {
             fprintf(stderr, "  [KERNEL] timer thread has no TIB; "
                             "timer DPCs will not run\n");
@@ -2790,7 +2798,7 @@ static void kernel_set_timer(uint32_t timer_va, long long due_100ns,
         InitializeCriticalSection(&g_timer_lock);
         g_timer_started = 1;
         {
-            HANDLE tt = CreateThread(NULL, 0, kernel_timer_thread, NULL, 0, NULL);
+            HANDLE tt = CreateThread(NULL, 0, kernel_timer_thread, (LPVOID)(uintptr_t)xbox_AllocThreadTib(), 0, NULL);
             if (tt && getenv("RECOMP_GUEST_AFFINITY")) SetThreadAffinityMask(tt, 1);
             if (tt) CloseHandle(tt);
         }

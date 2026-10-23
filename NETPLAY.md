@@ -41,19 +41,32 @@ Results (Node, the same build twice, side by side, Weathertop, same script):
   player's positions (`tt_statehash.c`), to be widened as the game's state is mapped.
 - **Standing still, and the opening cutscene: identical.** With no input, or input during Weathertop's opening
   cutscene (input ignored there), every actor's position matched in every frame, 1,575 frames.
-- **In combat: they part at in-play frame 1,129**, ~4 s after the scripted fighting starts: actor positions,
-  five pages of `.data/.bss` and dozens of object pages part within two frames, all at once. Positions were
-  identical to the bit until then, so it is one decision going differently, not drift: most likely state that
-  already differed when play began (a random generator advanced during loading, which takes a different number of
-  frames on each run) read for the first time when the AI acts. Being narrowed down (word-level RAM diffs at
-  frames 1, 1128 and 1129).
+- **In combat, the runs parted at in-play frame 1,129**, ~4 s into the scripted fighting: actor positions, pages
+  of `.data/.bss` and of objects all at once -- one decision going differently, from state that already differed
+  when play began. Two causes found and fixed:
+  1. **Half of the frame timer ran on real time.** `TT_FAKE_FRAME_MS` pinned the step the game mostly uses
+     (`0x4B8B98` ms, `0x4B8BA0` s) but not the raw step (`0x4B8B94`, `0x4B8B9C`) or the unpaused copies
+     (`0x4B8BA4`-`0x4B8BB0`), which game code reads too (`sub_000471F0`, `sub_000843F0`, ...). Now all eight
+     (`twotowers_manual.c`, `tt_frametime`). Not enough alone: the runs then parted at frame 1,116.
+  2. **Thread start-up raced the heap.** Each guest thread allocated its TIB from the guest heap as it started,
+     racing its creator's next allocations; the two Bink threads, started back to back, put theirs in either
+     order, so everything allocated after sat 4 KB apart between runs (pointers at play start: `0x013210AC` vs
+     `0x013220AC`). The game processes something in address order, and in combat that order decided. The TIB
+     is now allocated by the creator, after the stack (`kernel_bridge.c`; the kernel's timer thread too).
+- **With both fixed: identical actor positions in all 1,432 frames compared** (430 of them in combat), well past
+  the old split. The pages that still differ (153, from 266) are GPU and sound buffers, the profiler's cycle
+  counts (`0x6B1800`-`0x6B1CB0`), the timer's raw source values, counters (`0x8D2170`), and a few heap records of
+  contiguous-memory allocations (sound or GPU buffers allocated on real-time schedules) -- to be classified as
+  harmless or not by longer runs.
 - **Random numbers in the code**: the C runtime's `rand()` (`sub_0010011D`, state per thread, called from four
-  functions) and a per-object generator in `sub_00107ACC` (state at `+0x40C`, constant `0x19660D`). The AI's
-  dice are not yet identified.
+  functions) and a per-object generator in `sub_00107ACC` (state at `+0x40C`, constant `0x19660D`); deterministic
+  given the same state and call order, which the fixes above give.
 
-Next steps for determinism, in order: find what differs at play start and is read at frame 1,129; either make it
-identical at the barrier (reseed / copy at play start) or make the pre-play phase deterministic; repeat with longer
-fights and both heroes (co-op); then the other threads (the loader, Bink, the APU's writes into game memory).
+Next steps for determinism: longer fights, other levels, both heroes (co-op); then what the other threads write
+into game memory on real-time schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound
+interrupts, D3D callbacks, timer DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams.
+Anything the simulation reads from those must be tied to game frames. A desync check must then hash more than
+positions: the frame-1,128 diff of the first failure showed orientations differing before positions did.
 
 ## Transport on Cloudflare
 

@@ -719,6 +719,15 @@ static void tt_frametime(void)
             float fs = fake * 0.001f; uint32_t w;
             memcpy(&w, &fake, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
             memcpy(&w, &fs, 4); if (MEM32(0x4B8BA0u)) MEM32(0x4B8BA0u) = w;
+            {   /* (netplay) the rest of the timer too: the raw step (ms at
+                 * 0x4B8B94, s at 0x4B8B9C) and the unpaused copies
+                 * (0x4B8BA4-0x4B8BB0), which game code reads as well -- left
+                 * at real time, two runs at a fixed step parted in combat */
+                static const uint32_t ms_at[3] = { 0x4B8B94u, 0x4B8BA4u, 0x4B8BA8u }, s_at[3] = { 0x4B8B9Cu, 0x4B8BACu, 0x4B8BB0u };
+                int i;
+                memcpy(&w, &fake, 4); for (i = 0; i < 3; i++) if (MEM32(ms_at[i])) MEM32(ms_at[i]) = w;
+                memcpy(&w, &fs, 4); for (i = 0; i < 3; i++) if (MEM32(s_at[i])) MEM32(s_at[i]) = w;
+            }
         }
     }
     if (off < 0) off = getenv("TT_NO_MSCARRY") != NULL;
