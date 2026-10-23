@@ -2,7 +2,12 @@
 // public/ from web/site.mjs: the page and the build, no game data) and online
 // co-op's signalling and fallback relay for two players (NETPLAY.md).
 //
-//   GET  /match/<code>   WebSocket: the match's Durable Object (one per code)
+//   GET  /match/<code>   WebSocket: the match's Durable Object (one per code);
+//                        ?player=<id>: the browser's own id (kept across
+//                        reloads: the same id gets its role back)
+//   POST /match/<code>   create a game: {player, settings} -> 201, or 409 if
+//                        the code is taken; the creator is the host
+//   GET  /match/<code>   (not a WebSocket) {settings, players} or 404
 //   POST /turn           ICE servers for the RTCPeerConnection: Cloudflare's
 //                        TURN when TURN_KEY_ID and TURN_KEY_API_TOKEN are set
 //                        (wrangler secret put), else Cloudflare's STUN only
@@ -18,8 +23,13 @@
 // only, nothing of the disc). Only hashes cross the network. Signed with
 // BUILD_SECRET (wrangler secret put; .dev.vars locally, made by site.mjs).
 //
+// A created game keeps its settings (level, heroes) for the guest's page to
+// take, and its two players' ids, for a week. Without one (an address with
+// the switches in it, the test tools), the first in is the host, as before.
+//
 // Inside a match (JSON text messages, binary relayed as is):
-//   server -> client  {type:"welcome", role:"host"|"guest", peer:bool}
+//   server -> client  {type:"welcome", role:"host"|"guest", peer:bool, settings}
+//                     {type:"replaced"}   the same player connected again elsewhere
 //                     {type:"peer-joined"} / {type:"peer-left"}
 //   client -> other   {type:"signal", ...}   SDP and ICE candidates
 //                     {type:"hash", ...}     desync checks
@@ -43,10 +53,12 @@ export default {
 
     const m = url.pathname.match(/^\/match\/([A-Za-z0-9_-]{3,32})$/);
     if (m) {
-      if (request.headers.get("Upgrade") !== "websocket")
-        return new Response("expected a WebSocket", { status: 426, headers: CORS });
       // the object is created near whoever opens the match first, and stays there
-      return env.MATCH.getByName(m[1].toLowerCase()).fetch(request);
+      const res = await env.MATCH.getByName(m[1].toLowerCase()).fetch(request);
+      if (res.webSocket) return res;
+      const h = new Headers(res.headers);
+      for (const [k, v] of Object.entries(CORS)) h.set(k, v);
+      return new Response(res.body, { status: res.status, headers: h });
     }
 
     if (url.pathname === "/turn" && request.method === "POST") return iceServers(env);
@@ -148,33 +160,81 @@ async function iceServers(env) {
   return Response.json({ iceServers: servers, turn: true }, { headers: CORS });
 }
 
+const WEEK = 7 * 86400 * 1000;
+const PLAYER = /^[A-Za-z0-9_-]{8,64}$/;
+const HEROES = /^[a-z]{3,16}$/, LEVEL = /^[0-9]{2}[A-Z]{3,6}[0-9]$/;
+
 export class Match extends DurableObject {
   async fetch(request) {
-    const sockets = this.ctx.getWebSockets();
+    const url = new URL(request.url);
+    const game = await this.ctx.storage.get("game");   // {settings, host, guest, created} for a created game
+    if (request.headers.get("Upgrade") !== "websocket") {
+      if (request.method === "GET")
+        return game ? Response.json({ settings: game.settings, players: this.ctx.getWebSockets().length })
+                    : Response.json({ error: "no such game" }, { status: 404 });
+      if (request.method !== "POST") return new Response("expected a WebSocket, GET or POST", { status: 426 });
+      let body;
+      try { body = await request.json(); } catch { body = null; }
+      if (game || this.ctx.getWebSockets().length) return Response.json({ error: "that code is taken" }, { status: 409 });
+      const st = body?.settings;
+      if (!PLAYER.test(body?.player || "") || !st || !LEVEL.test(st.level) || !HEROES.test(st.p1) || !HEROES.test(st.p2))
+        return Response.json({ error: "bad game settings" }, { status: 400 });
+      const settings = { level: st.level, p1: st.p1, p2: st.p2 };
+      await this.ctx.storage.put("game", { settings, host: body.player, guest: null, created: Date.now() });
+      await this.ctx.storage.setAlarm(Date.now() + WEEK);
+      return Response.json({ ok: true, settings }, { status: 201 });
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    if (sockets.length >= 2) {   // (not kept: told, then closed)
+    const refuse = (why) => {   // (not kept: told, then closed)
       server.accept();
       server.send(JSON.stringify({ type: "full" }));
-      server.close(4000, "match full");
+      server.close(4000, why);
       return new Response(null, { status: 101, webSocket: client });
+    };
+    const player = PLAYER.test(url.searchParams.get("player") || "") ? url.searchParams.get("player") : null;
+    let sockets = this.ctx.getWebSockets();
+    // the same browser again (a reload, a second tab): it takes its place back. The old connection is told
+    // ({type:"replaced"}: its page closes it) and marked: nothing more is sent to it, its end is no departure
+    for (const s of sockets) {
+      const at = s.deserializeAttachment();
+      if (player && at?.player === player && !at.replaced) {
+        s.serializeAttachment({ ...at, replaced: true });
+        try { s.send(JSON.stringify({ type: "replaced" })); } catch {}
+      }
+    }
+    sockets = sockets.filter((s) => !s.deserializeAttachment()?.replaced);
+    let role;
+    if (game) {   // a created game: the host is its creator, the guest the first other player, kept for good
+      if (player && player === game.host) role = "host";
+      else if (player && (!game.guest || game.guest === player)) {
+        role = "guest";
+        if (!game.guest) { game.guest = player; await this.ctx.storage.put("game", game); }
+      } else return refuse("this game has its two players");
+      if (sockets.some((s) => s.deserializeAttachment()?.role === role)) return refuse("that player is already in");
+    } else {
+      if (sockets.length >= 2) return refuse("match full");
+      role = sockets.map((s) => s.deserializeAttachment()?.role).includes("host") ? "guest" : "host";
     }
     this.ctx.acceptWebSocket(server);
-    const taken = sockets.map((s) => s.deserializeAttachment()?.role);
-    const role = taken.includes("host") ? "guest" : "host";
-    server.serializeAttachment({ role });
-    server.send(JSON.stringify({ type: "welcome", role, peer: sockets.length === 1 }));
+    server.serializeAttachment({ role, player });
+    server.send(JSON.stringify({ type: "welcome", role, peer: sockets.length === 1, settings: game?.settings ?? null }));
     for (const other of sockets) other.send(JSON.stringify({ type: "peer-joined" }));
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  async alarm() { await this.ctx.storage.deleteAll(); }   // (a week after it was made: the game is forgotten)
+
   // everything a player sends goes to the other one
   async webSocketMessage(ws, message) {
-    for (const other of this.ctx.getWebSockets()) if (other !== ws) other.send(message);
+    if (ws.deserializeAttachment()?.replaced) return;
+    for (const other of this.ctx.getWebSockets()) if (other !== ws && !other.deserializeAttachment()?.replaced) other.send(message);
   }
 
   async webSocketClose(ws, code, reason) {
+    if (ws.deserializeAttachment()?.replaced) return;   // (the same player's new connection took its place: no departure)
     for (const other of this.ctx.getWebSockets())
-      if (other !== ws) other.send(JSON.stringify({ type: "peer-left" }));
+      if (other !== ws && !other.deserializeAttachment()?.replaced) other.send(JSON.stringify({ type: "peer-left" }));
   }
 }

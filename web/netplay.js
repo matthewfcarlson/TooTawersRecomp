@@ -16,6 +16,13 @@
 // If the data channel is not open 6 s after both are in, the same packets go
 // through the server (WebSocket, relayed by the match's Durable Object).
 // State hashes go through the server ({type:"hash"}): reliable, and slow is fine.
+//
+// Coming back (lobby.js): the page joins with this browser's player id, so a
+// reload gets its role back. A game cannot be joined halfway (both machines
+// step the same game from its first frame), so when the other player comes
+// back to a game under way here (past its first second), this page reloads
+// too and both start the level again together (sessionStorage tt-autostart:
+// straight into the game). A game still at its start just waits for them.
 (function () {
   const q = new URLSearchParams(location.search);
   const code = q.get('match');
@@ -39,6 +46,13 @@
       (state.rtt != null ? `, round trip ${state.rtt.toFixed(0)} ms` : '') +
       (state.desync ? ` · DESYNC at frame ${state.desync}` : '');
     el.className = state.desync ? 'bad' : '';
+    const sp = document.getElementById('together-status');   // (the splash's game card)
+    if (sp) { sp.textContent = (state.role ? `You are player ${state.role === 'host' ? 1 : 2}: ` : '') + state.path; sp.className = /full|closed|left|another/.test(state.path) ? 'bad' : ''; }
+  }
+  function restartTogether() {
+    state.path = 'the other player is back: starting the level again for both of you'; show(); log(state.path);
+    try { sessionStorage.setItem('tt-autostart', code); } catch {}
+    setTimeout(() => location.reload(), 1500);
   }
 
   function ready(fn) {
@@ -176,26 +190,36 @@
   }
 
   let signals = Promise.resolve();   // (signalling messages handled in the order they came)
-  const ws = state.ws = new WebSocket(`${server}/match/${encodeURIComponent(code)}`);
+  const ws = state.ws = new WebSocket(`${server}/match/${encodeURIComponent(code)}` + (self.ttPlayerId ? `?player=${self.ttPlayerId()}` : ''));
   ws.binaryType = 'arraybuffer';
   ws.onmessage = (e) => {
     if (typeof e.data !== 'string') return receive(e.data);   // relayed inputs
     const m = JSON.parse(e.data);
     if (m.type === 'welcome') {
       state.role = m.role;
+      self.ttRememberRole?.(m.role);
       ready(() => Module._tt_np_set_role(m.role === 'guest' ? 1 : 0));
       state.path = m.peer ? 'connecting to the other player' : 'waiting for the other player';
       log(`joined as the ${m.role}`); show();
       if (m.peer) { peerIn = true; startPeer(); }
     } else if (m.type === 'peer-joined') {
+      // they came back to a game under way here: start again together. (Not a game still at its start, waiting
+      // for them -- the page that just restarted for them is one: it would send them round again.)
+      if (Module.ttReady && newestSent > 30) return restartTogether();
       peerIn = true; state.path = 'connecting to the other player'; show(); startPeer();
     } else if (m.type === 'peer-left') {
-      state.path = 'the other player left'; show(); log(state.path);
+      state.path = 'the other player left (when they open the link again, the level starts over for both)'; show(); log(state.path);
+    } else if (m.type === 'replaced') {   // (this browser opened the game again elsewhere: that one plays)
+      state.replaced = true; ws.close(); state.dc?.close(); state.pc?.close();
+      state.path = 'this game was opened in another tab or window'; show(); log(state.path);
     } else if (m.type === 'full') {
-      state.path = 'this match is full'; show();
+      state.path = 'this game already has its two players'; show();
     } else if (m.type === 'signal') signals = signals.then(() => onSignal(m)).catch((e) => log('signalling: ' + e.message));
     else if (m.type === 'hash') { theirHashes.set(m.frame, m.h); compare(m.frame); }
   };
-  ws.onclose = () => { if (!state.relay || state.dc?.readyState !== 'open') { state.path += ' (server connection closed)'; show(); } };
+  ws.onclose = (e) => {
+    if (state.replaced) return;
+    if (!state.relay || state.dc?.readyState !== 'open') { state.path += ' (server connection closed)'; show(); }
+  };
   show();
 })();

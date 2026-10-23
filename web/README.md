@@ -80,7 +80,15 @@ then Play (which also counts as the click browsers need before sound starts).
 node web/serve.mjs
 ```
 
-Both players open the same address, with a match code and the co-op switches, e.g.
+**On the hosted page** (the splash's "Play together", `lobby.js`): the host picks the level and the two heroes and
+makes a game; the server keeps those settings and the page shows its link, `…/?match=fell-7k2q`, to copy or share.
+The friend opens the link (or types the code), and their game takes the settings from the server, so the two cannot
+start differently. Each browser keeps a player id (localStorage): the maker is always player 1, the first other
+player player 2 for good, a third is turned away, and a reload or the link opened again gets the same role back. A
+game can't be joined halfway, so when a player comes back to a game under way, the other page reloads too and both
+start the level over together. The splash lists your recent games (a week: then the server forgets them) to rejoin.
+
+**With the switches in the address** (the test tools, and `serve.mjs`): both players open the same address, e.g.
 `http://localhost:8080/?match=night1&TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1&TT_COOP=clone&TT_COOP_P2CHAR=legolas`.
 The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at a deployed
 server. The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
@@ -111,6 +119,7 @@ node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same bu
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
 node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
+node web/tools/together-check.mjs OUT [URL] [ISO]                       # make, share, join and reload a game, as players do
 node web/tools/coop-suite.mjs [--only a,b] [--save DIR] [KEY=VALUE ...] # upstream's co-op bot suite in the browser
 # --gpu on either: use the machine's GPU (headless Chrome otherwise draws WebGL in software)
 ```

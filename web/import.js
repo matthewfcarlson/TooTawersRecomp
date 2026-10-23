@@ -28,7 +28,11 @@
     } catch { return false; }
   }
   const serverHas = (name) => fetch(name, { method: 'HEAD' }).then((r) => r.ok).catch(() => false);
-  const loadGame = () => { const s = document.createElement('script'); s.src = 'build/twotowers_recomp.js'; document.body.append(s); };
+  const loadGame = () => {
+    // the game's switches as they are now (lobby.js may have added a shared game's)
+    if (self.ttArgs) Module.arguments = Object.entries(self.ttArgs).map(([k, v]) => `${k}=${v}`);
+    const s = document.createElement('script'); s.src = 'build/twotowers_recomp.js'; document.body.append(s);
+  };
 
   // a file of the imported disc (its names as on the disc; any case, as the game asks)
   async function discFile(rel) {
@@ -63,6 +67,7 @@
 
   async function startGame() {
     const what = $('setup-what');
+    if (self.ttLobby && !(await self.ttLobby.ready)) return;   // (a shared game's link that leads nowhere)
     what.textContent = 'Checking your disc…';
     try { await unlockBuild(); }
     catch (e) { what.textContent = ''; $('setup-error').textContent = e.message; panel.hidden = false; await refresh(); return; }
@@ -94,7 +99,7 @@
     $('setup-disc-state').textContent = disc ? 'imported ✓' : 'not imported yet';
     $('setup-ultra-state').textContent = ultra ? 'built ✓' : pack ? 'copied, not built yet' : 'not imported (optional)';
     $('setup-build').hidden = !pack || ultra;
-    $('setup-play').disabled = !disc;
+    $('setup-play').disabled = !disc || self.ttLobbyBlocked;
     $('step-disc').classList.toggle('done', disc);
     $('step-ultra').classList.toggle('done', ultra);
     $('setup-play-note').textContent = disc ? (ultra ? 'Your disc and the Ultra textures are ready.' : 'Your disc is ready.') : 'Import your disc first.';
@@ -171,6 +176,11 @@
     // your machine's server with your disc (web/serve.mjs): straight into the game; the hosted page: the splash,
     // with Play once the disc is in (that click also lets the sound start)
     if (await serverHas('disc-manifest.json')) return startGame();
+    // a co-op game restarting after a reload (netplay.js): back into it at once
+    if (q.get('match') && sessionStorage.getItem('tt-autostart') === q.get('match') && await opfsHas('disc/.complete')) {
+      sessionStorage.removeItem('tt-autostart');
+      return startGame();
+    }
     panel.hidden = false;
     await refresh();
   })();

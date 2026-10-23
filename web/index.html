@@ -57,7 +57,8 @@
   .divider { display: block; width: min(420px, 80%); height: 18px; margin: 18px auto; }
   .dedication { margin: 0 auto 36px; font: italic 500 clamp(19px, 2.6vw, 27px)/1.3 'Cormorant Garamond', Georgia, serif;
     color: #efe4c8; text-shadow: 0 0 18px rgba(231,199,122,.25); }
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 18px; text-align: left; }
+  .steps { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; text-align: left; }
+  @media (max-width: 760px) { .steps { grid-template-columns: minmax(0, 1fr); } }
   .card { position: relative; padding: 22px 22px 20px; border-radius: 16px; border: 1px solid rgba(231,199,122,.2);
     background: linear-gradient(180deg, rgba(30,33,43,.74), rgba(13,14,19,.82)); backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.04);
@@ -103,6 +104,32 @@
   .privacy a { color: var(--gold); }
   #setup-space { margin-top: 6px; color: #777064; font: 12px/1.4 system-ui, sans-serif; }
   #setup-forget { background: none; border: 0; padding: 0; color: var(--muted); font: 12px system-ui, sans-serif; text-decoration: underline; cursor: pointer; }
+  .card.wide { grid-column: 1 / -1; }
+  .together { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 18px; align-items: start; }
+  .field { display: grid; gap: 6px; margin: 0 0 12px; font: 600 11px/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .field select, .field input, .link input, .join input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px; color: var(--text);
+    background: rgba(0,0,0,.35); border: 1px solid rgba(231,199,122,.25); font: 14px/1.2 system-ui, sans-serif; letter-spacing: 0; text-transform: none; }
+  .field select:focus, .field input:focus, .link input:focus, .join input:focus { outline: 2px solid rgba(231,199,122,.5); outline-offset: 1px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .join { display: flex; gap: 8px; }
+  .join input { flex: 1; min-width: 0; }
+  #together-recent ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  #together-recent li { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 10px; align-items: center;
+    padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.06); }
+  #together-recent .g-what { font: 13px/1.35 system-ui, sans-serif; color: var(--text); overflow-wrap: anywhere; }
+  #together-recent .g-when { grid-row: 2; font: 12px/1.3 system-ui, sans-serif; color: var(--muted); }
+  #together-recent .btn { grid-row: 1 / 3; grid-column: 2; text-decoration: none; }
+  .sub { margin: 0 0 10px; font: 600 11px/1 system-ui, sans-serif; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .game-code { font: 600 clamp(22px, 4vw, 30px)/1.1 Cinzel, Georgia, serif; letter-spacing: .06em; color: var(--gold-hi); margin: 2px 0 4px; }
+  #together-what { color: var(--text); font: 14px/1.4 system-ui, sans-serif; margin-bottom: 14px; }
+  .link { display: flex; gap: 8px; flex-wrap: wrap; }
+  .link input { flex: 1 1 220px; font-family: ui-monospace, monospace; font-size: 12px; }
+  #together-status { margin-top: 12px; color: var(--gold); font: 600 13px/1.4 system-ui, sans-serif; }
+  #together-status.bad { color: #ff8a7a; }
+  #together-error { color: #ff8a7a; font: 600 13px/1.4 system-ui, sans-serif; margin-top: 8px; }
+  #together-error:empty { display: none; }
+  .quiet { color: var(--muted); font: 12px/1.4 system-ui, sans-serif; }
+  .quiet a { color: var(--gold); }
   @media (prefers-reduced-motion: reduce) { .fog, .ember, .ember-glow { animation: none; } .ember { display: none; } }
   @media (max-width: 720px) { .tower { opacity: .45; height: 52vh; } .eyebrow { letter-spacing: .2em; font-size: 11px; } }
   #log { height: 220px; overflow: auto; background: #000; color: #9c9; font: 12px/1.35 ui-monospace, monospace;
@@ -163,6 +190,57 @@
             <button id="setup-build" class="btn" hidden>Build the Ultra textures</button>
             <span class="state" id="setup-ultra-state"></span>
           </div>
+        </div>
+        <div class="card wide" id="step-together">
+          <h3><span class="num">3</span>Play together <span class="opt">optional</span></h3>
+          <div id="together-new" hidden>
+            <p>Two players, each with their own disc, on two machines. Make a game and send your friend the link,
+               or join theirs. Skip this to play alone.</p>
+            <div class="together">
+              <div>
+                <div class="sub">Make a game</div>
+                <label class="field">Level <select id="together-level"></select></label>
+                <div class="pair">
+                  <label class="field">You (player 1) <select id="together-p1"></select></label>
+                  <label class="field">Your friend <select id="together-p2"></select></label>
+                </div>
+                <button class="btn" id="together-create">Make a game and get its link</button>
+                <p class="quiet" style="margin-top:10px">So far only Weathertop has been tested in co-op.</p>
+              </div>
+              <div>
+                <div class="sub">Join a game</div>
+                <form class="join" id="together-join">
+                  <input id="together-code" placeholder="a link or a code, e.g. fell-7k2q" autocomplete="off" aria-label="The game's link or code">
+                  <button class="btn" type="submit">Join</button>
+                </form>
+                <div id="together-recent" hidden style="margin-top:18px">
+                  <div class="sub">Your recent games</div>
+                  <ul id="together-recent-list"></ul>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="together-game" hidden>
+            <div class="together">
+              <div>
+                <div class="sub">This game</div>
+                <div class="game-code" id="together-code-shown"></div>
+                <div id="together-what"></div>
+                <div id="together-status"></div>
+              </div>
+              <div>
+                <div class="sub">Send your friend this link</div>
+                <div class="link">
+                  <input id="together-link" readonly aria-label="The game's link">
+                  <button class="btn" id="together-copy">Copy the link</button>
+                  <button class="btn" id="together-share" hidden>Share…</button>
+                </div>
+                <p class="quiet" style="margin-top:12px">If either of you reloads or loses the connection, open the same
+                  link again: the level starts over for both of you. <a id="together-leave">Leave this game</a></p>
+              </div>
+            </div>
+          </div>
+          <div id="together-error"></div>
         </div>
       </div>
       <div class="play">
@@ -238,6 +316,7 @@
   // (?RECOMP_RENDERER=software: the CPU renderer instead of WebGL2)
   const args = {};
   for (const [k, v] of new URLSearchParams(location.search)) args[k] = v;
+  self.ttArgs = args;   // (lobby.js fills in a shared game's settings before the game starts)
   if (args.TT_WEB_LOGALL) { allLines = []; self.ttLogTake = () => allLines.splice(0); }
   // online co-op (?match=<code>, web/netplay.js): the game takes its inputs in lockstep
   // at a fixed step: both machines must step the game by the same time each frame (NETPLAY.md)
@@ -402,6 +481,7 @@
     }
   })();
 </script>
+<script src="lobby.js"></script>
 <script src="netplay.js"></script>
 <!-- the game (twotowers_recomp.js) starts from here once its files are there -->
 <script src="import.js"></script>
