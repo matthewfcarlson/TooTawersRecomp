@@ -33,7 +33,8 @@ What works: the menus, the videos, the levels, the keyboard. What doesn't yet: s
 ```sh
 node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same build under Node, no window; frames to BMP
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
+node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
 ```
 
-`browser-check.mjs` needs `npm install` in `web/tools` (playwright-core) and a Chromium from Playwright's cache
+`browser-check.mjs` and `profile.mjs` need `npm install` in `web/tools` (playwright-core) and a Chromium from Playwright's cache
 (`npx playwright install chromium`).

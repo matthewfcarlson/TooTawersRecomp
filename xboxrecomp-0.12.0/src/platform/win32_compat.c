@@ -887,7 +887,16 @@ int GetThreadPriority(HANDLE h)
     return (o && o->kind == K_THREAD) ? o->priority : THREAD_PRIORITY_NORMAL;
 }
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten/threading.h>
+/* (web port) a worker cannot give up its time slice: sched_yield returns at
+ * once, and every "yield until the deadline" loop (the game's vblank/GPU
+ * waits, the timer and ack threads) spun a whole core on clock reads, each a
+ * call out to JavaScript. A short sleep instead. */
+VOID SwitchToThread(void) { emscripten_thread_sleep(0.05); }
+#else
 VOID SwitchToThread(void) { sched_yield(); }
+#endif
 
 DWORD QueueUserAPC(PAPCFUNC func, HANDLE thread, ULONG_PTR data)
 {
@@ -911,7 +920,7 @@ DWORD QueueUserAPC(PAPCFUNC func, HANDLE thread, ULONG_PTR data)
 
 VOID Sleep(DWORD ms)
 {
-    if (ms == 0) { sched_yield(); return; }
+    if (ms == 0) { SwitchToThread(); return; }
     struct timespec ts = { ms / 1000, (long)(ms % 1000) * 1000000L };
     while (nanosleep(&ts, &ts) == -1 && errno == EINTR) { }
 }
