@@ -1,0 +1,11 @@
+{
+  // (web port) online co-op's signalling and relay (src/index.js, NETPLAY.md)
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "twotowers-netplay",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-01",
+  "durable_objects": {
+    "bindings": [{ "name": "MATCH", "class_name": "Match" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Match"] }]
+}

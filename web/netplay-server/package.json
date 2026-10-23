@@ -1,0 +1,13 @@
+{
+  "name": "twotowers-netplay-server",
+  "private": true,
+  "description": "(web port) signalling and relay for online co-op: a Cloudflare Worker and one Durable Object per match",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.152.0"
+  }
+}

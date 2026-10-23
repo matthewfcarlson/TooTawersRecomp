@@ -55,3 +55,6 @@ tools/coop-bot/config.ps1
 # (web port) the texture pack and what is built from it (not ours to publish)
 /textures/
 *.rar
+/web/netplay-server/node_modules/
+/web/netplay-server/.wrangler/
+/web/netplay-server/.dev.vars

@@ -9,33 +9,33 @@ aims at three things, in this order of dependency:
 3. **Better visuals, in the browser and on the desktop:** high internal resolution, better textures, and
    compute-shader ray tracing (shadows, AO, maybe one bounce of indirect light).
 
-Written 2026-10-22, at the start of the fork; the status below was updated the same day.
+Written 2026-10-22, at the start of the fork; the status below was updated 2026-10-23.
 
-## Status (2026-10-22)
+## Status (2026-10-23)
 
-**The game runs in the browser** (Chrome, Firefox; `web/README.md`): the menus and videos at 30 frames/s, the levels
-at about 4 (software rendering), keyboard only, no sound yet. One build (wasm64, pthreads, WasmFS) runs in the page and
-under Node for tests. What it took:
+**The game plays in the browser** (Chrome, Firefox; `web/README.md`): WebGL2 rendering at the game's 30 frames/s
+in a level, sound, keyboard and controllers, saves kept in the browser, and the Ultra textures (the GLOS69 pack).
+One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. What it took:
 
-- **Memory:** the guest's 4 GB as one untouched allocation in linear memory, with views claimed at `va + offset`
-  as on the desktop (`win32_compat_wasm_mem.inc`). Second views can't alias: the RAM mirrors and the tiled view at
-  0xF0000000 are refused and logged. No evidence yet that the game uses them (it plays a level without).
-- **Device traps:** only the APU (pointer accesses from DirectSound) and AC'97 still trapped on the desktop; the GPU
-  never did (its aperture is plain memory, answered by a polling thread), and USB went away with 1.9.5's direct input.
-  AC'97 resets are now completed in code (`postproc_ac97.py`); the APU's pointer accesses still need it.
-- **Files:** the disc fetched from the dev server in chunks as read (WasmFS fetch backend, case-insensitive); home
-  (ini, saves, the hard-disk images) in OPFS, with Emscripten's OPFS read/write replaced (`web/opfs_fix.js`: they
-  failed with a shared heap under memory64).
-- **Fixes the web needed:** two function-pointer type mismatches WebAssembly traps on (the APU's thread start, the
-  pad hooks' `unsigned long`), a cycle counter that never repeats (a coarse browser clock gave the game a divide by
-  zero), no raw 5.8 GB partition images in memory.
-- **Display and input:** no SDL window; each flipped frame is converted and drawn on the page's canvas, keys go
-  straight to the game's key table.
-- **macOS (native):** upstream's experimental build now opens its window (frame loop on the main thread); it still
+- **Memory:** the guest's 4 GB as one untouched allocation in a fixed 6 GB linear memory, views claimed at
+  `va + offset` as on the desktop (`win32_compat_wasm_mem.inc`). Second views can't alias: the RAM mirrors and the
+  tiled view at 0xF0000000 are refused and logged; the game plays without them.
+- **Device traps:** only the APU (pointer accesses from DirectSound) and AC'97 trapped on the desktop; the GPU never
+  did. AC'97 resets are completed in code (`postproc_ac97.py`); the APU's pointer accesses still need routing (if
+  some sounds turn out missing, that is why).
+- **Rendering:** the port's OpenGL renderer on WebGL2, on its own thread with the page's canvas handed to it
+  (`nv2a_gl.inc`: BGRA swizzles, no base-vertex draws, GLSL ES); fast after three fixes: no growable memory,
+  `glGetError` rarely, every streamed upload a fresh buffer (orphaning) -- from 0.6 to 30 frames/s.
+- **Sound:** the APU's output through a ring in shared memory to an AudioWorklet. **Input:** keys to the game's
+  key table, pads polled from the Gamepad API by the page. **Files:** the disc and the Ultra textures fetched from
+  the dev server in chunks as read (WasmFS fetch backend; its chunking bug fixed in `web/fetch_fix.js`), home and
+  saves in OPFS (`web/opfs_fix.js`), the hard disk's E: mapped there.
+- **Fixes the web needed:** function-pointer type mismatches WebAssembly traps on, a cycle counter that never
+  repeats, a yield that really yields (spinning workers cost 30% of the frame rate), WebGL uploads past 4 GB.
+- **macOS (native):** upstream's experimental build opens its window now (frame loop on the main thread); it still
   needs `RECOMP_GPU_ASYNC=1` and hasn't been played through.
 
-**Next:** profiling. The game's own code takes ~120 ms a frame in a level in the browser (natively ~2 ms), and
-far more under Node. Then sound (DirectSound output from a worker), WebGPU rendering, netplay.
+**Online co-op:** in progress; design, Cloudflare transport choice and determinism results in `NETPLAY.md`.
 
 ## Why a fork of the recomp, not a decomp
 
