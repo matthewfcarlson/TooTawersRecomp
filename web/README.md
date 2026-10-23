@@ -41,12 +41,27 @@ ring in the shared memory to an AudioWorklet. Controllers go through the browser
 one so the browser shows it), with rumble where the browser supports it; the game's own device and co-op settings
 apply as on the desktop.
 
+## Online co-op (in progress)
+
+```sh
+(cd web/netplay-server && npm install && npm run dev)   # the match server (Cloudflare Worker, locally: 8787)
+node web/serve.mjs
+```
+
+Both players open the same address, with a match code and the co-op switches, e.g.
+`http://localhost:8080/?match=night1&TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1&TT_COOP=clone&TT_COOP_P2CHAR=legolas`.
+The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at a deployed
+server. The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
+connection (direct, relayed by TURN, or through the server) and the round trip, and says so if the two games ever
+differ (a desync). Design and status: `../NETPLAY.md`.
+
 ## Test it
 
 ```sh
 node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same build under Node, no window; frames to BMP
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
+node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
 # --gpu on either: use the machine's GPU (headless Chrome otherwise draws WebGL in software)
 ```
 

@@ -37,6 +37,7 @@
 #include <string.h>
 #include <math.h>
 #include <sys/stat.h>
+extern uint32_t tt_clock_ms(void);   /* (netplay, tt_netplay.c) */
 
 extern ptrdiff_t xbox_GetMemoryOffset(void);
 extern void tt_dbg(const char *fmt, ...);
@@ -5963,7 +5964,7 @@ static void fall_catch_frame(void)
     static float pz, px, py, sx, sy, sz; static int steady, have_spawn, said;
     static int off = -1;
     uint32_t p, scr = G32(0x4AD050u);
-    DWORD now = GetTickCount();
+    DWORD now = tt_clock_ms();   /* (netplay: game time at a fixed step, tt_netplay.c) */
     float x, y, z;
     int i, k;
     if (off < 0) off = getenv("TT_NOCATCH") != NULL;
@@ -6089,7 +6090,7 @@ static void sprint_frame(void)
     float x, y, z, dx, dy, d, want;
     static int l3_last, push_last;
     int l3, push, lunge;
-    DWORD now = GetTickCount();
+    DWORD now = tt_clock_ms();   /* (netplay: game time at a fixed step, tt_netplay.c) */
     if (tt_in_polls) {   /* (what the pads said since the last frame; none read: as before) */
         l3_last = tt_l3_acc; push_last = tt_push_acc;
         tt_l3_acc = 0; tt_push_acc = 0; tt_in_polls = 0;

@@ -30,6 +30,12 @@
  * TT_STATEHASH_DUMP=dir:f1,f2,... writes all of RAM and the contiguous window
  * at those frames (dir/ram_<frame>.bin, 64 MB each from 0x00010000; then
  * cont_<frame>.bin), to diff two runs word by word where their hashes part.
+ * TT_STATEHASH_DUMPDATA=dir:from-to writes the image's .data/.bss
+ * (0x0018B6E0-0x008DD998) at every frame from..to (dir/data_<frame>.bin),
+ * to find the first word in which two runs part.
+ * TT_STATEHASH_INJECT=<file> (testing): at frame 1, writes the words listed
+ * in the file (lines "<hex address> <hex value>") -- another run's values,
+ * to find which of the words that differ at the start of play matter.
  *
  * The hash is not a cryptographic one: 64-bit words mixed by multiply and
  * rotate, enough to tell two states apart. */
@@ -84,6 +90,13 @@ static uint64_t sh_actors(uint32_t *count)
     return h ^ (h >> 29);
 }
 
+/* (netplay) the simulation's hash now, for the desync check (tt_netplay.c) */
+uint64_t tt_statehash_sim(void)
+{
+    uint32_t n;
+    return sh_actors(&n);
+}
+
 void tt_statehash_frame(uint32_t game_ms)
 {
     static int on = -1, every = 1, from = 0, inplay = 0;
@@ -106,6 +119,33 @@ void tt_statehash_frame(uint32_t game_ms)
         if (st != 6 && st != 8) { frame = 0; return; }
     }
     frame++;
+    if (frame == 1) {   /* testing: another run's words, at the start of play */
+        static int done;
+        const char *inj = getenv("TT_STATEHASH_INJECT");
+        FILE *fi;
+        if (inj && !done && (fi = fopen(inj, "r")) != NULL) {
+            unsigned a, v, n = 0;
+            while (fscanf(fi, "%x %x", &a, &v) == 2) {
+                *(volatile uint32_t *)((uintptr_t)a + g_xbox_mem_offset) = v;
+                n++;
+            }
+            fclose(fi);
+            done = 1;
+            fprintf(stderr, "  [STATEHASH] frame 1: %u word(s) written from %s\n", n, inj);
+        }
+    }
+    {   /* .data/.bss at every frame of a range */
+        static const char *dd = (const char *)1; static unsigned from, to;
+        if (dd == (const char *)1) {
+            dd = getenv("TT_STATEHASH_DUMPDATA");
+            if (dd && strchr(dd, ':')) sscanf(strchr(dd, ':') + 1, "%u-%u", &from, &to);
+        }
+        if (dd && frame >= from && frame <= to) {
+            char path[512]; FILE *d;
+            snprintf(path, sizeof path, "%.*s/data_%05u.bin", (int)(strchr(dd, ':') - dd), dd, (unsigned)frame);
+            if ((d = fopen(path, "wb"))) { fwrite((const void *)((uintptr_t)0x0018B6E0u + g_xbox_mem_offset), 1, 0x008DD998u - 0x0018B6E0u, d); fclose(d); }
+        }
+    }
     {   /* pictures of chosen frames */
         static const char *shots = (const char *)1;
         if (shots == (const char *)1) shots = getenv("TT_STATEHASH_SHOTS");

@@ -179,7 +179,7 @@ void sub_000CF450(void)
     { extern void tt_framelog(void); tt_framelog(); }   /* (testing: TT_HEADLOG) */
     { extern void tt_coopprobe_frame(void); tt_coopprobe_frame(); }   /* (coop-anything research probe: TT_COOPPROBE) */
     { extern void tt_coop_frame(void); tt_coop_frame(); }   /* (coop-anything prototype: TT_COOP) */
-    { extern volatile unsigned long long tt_hud_drawn_ms; extern __declspec(dllimport) unsigned long long __stdcall GetTickCount64(void); tt_hud_drawn_ms = GetTickCount64(); }
+    { extern volatile unsigned long long tt_hud_drawn_ms; extern uint32_t tt_clock_ms(void); tt_hud_drawn_ms = tt_clock_ms(); }   /* (netplay: game time at a fixed step, tt_netplay.c) */
     { extern void tt_coop_hud_pre(void); tt_coop_hud_pre(); }   /* (coop-anything: player 2's health sword, after the E3 HUD took its slot) */
     sub_000CF450_gen();
     { extern void tt_coop_hud_post(void); tt_coop_hud_post(); }
@@ -979,9 +979,12 @@ volatile unsigned long long tt_hud_drawn_ms;   /* the HUD last drawn (0x000CF450
 /* an in-engine scene: play's screen, no film, and no HUD drawn lately */
 int tt_in_scene(void)
 {
-    extern __declspec(dllimport) unsigned long long __stdcall GetTickCount64(void);
+    /* (netplay) by tt_clock_ms, which at a fixed step is game time: on the wall
+     * clock any frame slower than 300 ms counted as a scene, on one machine
+     * and not the other, and the co-op's placement and targeting followed */
+    extern uint32_t tt_clock_ms(void);
     extern int xbox_MoviePlaying(void);
-    return MEM32(0x4AD050u) == 6 && !xbox_MoviePlaying() && GetTickCount64() - tt_hud_drawn_ms > 300;
+    return MEM32(0x4AD050u) == 6 && !xbox_MoviePlaying() && tt_clock_ms() - (uint32_t)tt_hud_drawn_ms > 300u;
 }
 /* testing: TT_DTSCAN=1 -- find the game's clock: guest memory words (float
  * seconds or milliseconds, or whole ms) that advance as fast as the time the
@@ -2454,7 +2457,8 @@ void sub_000B9530(void)
 extern void tt_dbg(const char *fmt, ...);
 extern __declspec(dllimport) tt_dword __stdcall GetTickCount(void);
 static int coop_probe_on(void) { static int on = -1; if (on < 0) on = getenv("TT_COOPPROBE") != NULL; return on; }
-static uint32_t coop_ms(void) { static uint32_t t0; uint32_t t = GetTickCount(); if (!t0) t0 = t; return t - t0; }
+extern uint32_t tt_clock_ms(void);   /* (netplay: game time at a fixed step, tt_netplay.c) */
+static uint32_t coop_ms(void) { static uint32_t t0; uint32_t t = tt_clock_ms(); if (!t0) t0 = t; return t - t0; }
 
 extern void sub_000F1230_gen(void);
 void sub_000F1230(void)
@@ -2832,7 +2836,8 @@ static void coop_p2_weapon_ids(const char *when)
         MEM32(w + 0x2F4) = id;
     }
 }
-static uint32_t coop_now(void) { extern __declspec(dllimport) tt_dword __stdcall GetTickCount(void); return (uint32_t)GetTickCount(); }
+/* (netplay) the co-op's clock: game time at a fixed step, so both machines time it alike (tt_netplay.c) */
+static uint32_t coop_now(void) { extern uint32_t tt_clock_ms(void); return tt_clock_ms(); }
 
 /* -- player 2's pad -- */
 typedef struct { uint16_t buttons; uint8_t analog[8]; int16_t lx, ly, rx, ry; } CoopPad;

@@ -105,6 +105,7 @@ http.createServer((req, res) => {
   res.on('finish', () => { if (res.statusCode >= 400) console.log(`${res.statusCode} ${req.method} ${req.url}`); });
   const url = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/\/+/g, '/');
   if (url === '/' || url === '/index.html') return sendFile(req, res, path.join(repo, 'web', 'index.html'));
+  if (url === '/netplay.js') return sendFile(req, res, path.join(repo, 'web', 'netplay.js'));
   if (url === '/disc-manifest.json') return send(res, 200, { 'Content-Type': 'text/plain' }, manifest());
   if (url === '/ultra-manifest.json')
     return ultra ? send(res, 200, { 'Content-Type': 'text/plain' }, listFiles(ultra, ['GLOS69', 'textures_ultra']).join('\n') + '\n')

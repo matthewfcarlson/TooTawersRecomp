@@ -589,6 +589,11 @@ static volatile LONG s_player_pad[XBOX_MAX_CONTROLLERS] = { PAD_NONE, PAD_NONE, 
 /* (a title's two-player modes) set by the title: with one controller, the
  * keyboard is player 1's and the controller player 2's */
 volatile int xbox_input_two_players;
+/* (netplay) Online co-op: two players, but one on this machine -- its devices
+ * are player 1's (port 0) as in a one-player game, whichever hero it plays;
+ * the title's lockstep code sends them to the other machine. */
+volatile int xbox_input_netplay;
+#define TWO_LOCAL_PLAYERS (xbox_input_two_players && !xbox_input_netplay)
 static volatile LONG s_pads_found;
 /* (two players) each player's device: -1 automatic, 0 keyboard and mouse
  * (player 1; for player 2: none), n the n-th controller connected */
@@ -604,7 +609,7 @@ void xbox_InputDeviceName(int i, char *out, int n)
     pad_name(s_dev_list[i], out, n);
 }
 /* the player the keyboard and mouse are (two players: player 2's when he chose them) */
-int xbox_InputKeyboardPort(void) { return xbox_input_two_players && xbox_input_dev_choice[1] == 0 ? 1 : 0; }
+int xbox_InputKeyboardPort(void) { return TWO_LOCAL_PLAYERS && xbox_input_dev_choice[1] == 0 ? 1 : 0; }
 /* the device player n (0-1) has now: 0 keyboard / none, k the k-th controller */
 int xbox_InputPlayerDevice(int port)
 {
@@ -646,7 +651,7 @@ static void pads_scan_once(void)
         for (c = 0; c < nf && c < 8; c++) s_dev_list[c] = found[c];
         s_dev_n = nf < 8 ? (int)nf : 8;
     }
-    if (xbox_input_two_players && (xbox_input_dev_choice[0] >= 0 || xbox_input_dev_choice[1] >= 0)) {
+    if (TWO_LOCAL_PLAYERS && (xbox_input_dev_choice[0] >= 0 || xbox_input_dev_choice[1] >= 0)) {
         /* two players, devices chosen: -1 automatic, 0 the keyboard and mouse
          * (player 1) / none, n the n-th controller found */
         DWORD pad[2] = { PAD_NONE, PAD_NONE }, used = 0, p;
@@ -665,7 +670,7 @@ static void pads_scan_once(void)
         InterlockedExchange(&s_player_pad[1], (LONG)pad[1]);
         for (k = 2; k < XBOX_MAX_CONTROLLERS; k++) InterlockedExchange(&s_player_pad[k], (LONG)PAD_NONE);
     } else
-    if (xbox_input_two_players && nf == 1) {
+    if (TWO_LOCAL_PLAYERS && nf == 1) {
         /* two players, one controller: player 1 has the keyboard and mouse,
          * player 2 the controller */
         InterlockedExchange(&s_player_pad[0], (LONG)PAD_NONE);

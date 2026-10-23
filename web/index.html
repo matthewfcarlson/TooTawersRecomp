@@ -10,7 +10,9 @@
   main { max-width: 1000px; margin: 0 auto; padding: 16px; }
   #screen { width: 100%; aspect-ratio: 4 / 3; background: #000; display: block; image-rendering: auto; outline: none; }
   #status { margin: 8px 0; color: var(--dim); }
-  #status.bad { color: var(--bad); }
+  #status.bad, #netplay.bad { color: var(--bad); }
+  #netplay { margin: 4px 0; color: var(--warn); }
+  #netplay:empty { display: none; }
   details { margin: 8px 0; }
   kbd { background: #2a2a2a; border-radius: 3px; padding: 0 4px; font-size: 12px; }
   #log { height: 220px; overflow: auto; background: #000; color: #9c9; font: 12px/1.35 ui-monospace, monospace;
@@ -22,6 +24,7 @@
   <canvas id="ttmain" width="1" height="1" hidden></canvas>
   <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
   <div id="status">Loading…</div>
+  <div id="netplay"></div>
   <details>
     <summary>Keys (click the picture first: that also starts the sound)</summary>
     <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move ·
@@ -44,7 +47,7 @@
   const lines = [];
   let logDirty = false;
   const keyLines = [];   // the lines worth keeping whatever scrolls past (web/tools read them)
-  const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
+  const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|NETPLAY|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
   function log(text) {
     if (KEY.test(text) && keyLines.length < 2000) keyLines.push(text);
     lines.push(text);
@@ -71,6 +74,13 @@
   // (?RECOMP_RENDERER=software: the CPU renderer instead of WebGL2)
   const args = {};
   for (const [k, v] of new URLSearchParams(location.search)) args[k] = v;
+  // online co-op (?match=<code>, web/netplay.js): the game takes its inputs in lockstep
+  // at a fixed step: both machines must step the game by the same time each frame (NETPLAY.md)
+  if (args.match) {
+    args.TT_NETPLAY = '1';
+    args.TT_FAKE_FRAME_MS ??= '33.333333';
+    delete args.match; delete args.server;
+  }
 
   let frames = 0, t0 = performance.now(), ended = false, ready = false;   // ready: the game's exports can be called
   function countFrames(n) {
@@ -93,7 +103,11 @@
     },
     ttFrames: countFrames,   // WebGL: frames presented, reported in batches
     ttAudioStart(buf, ptr, frames) { audio = { buf, ptr, frames }; },   // the game's sound ring (apu_xaudio2.c)
-    onRuntimeInitialized() { ready = true; },
+    onRuntimeInitialized() {
+      ready = true;
+      Module.ttReady = true;
+      for (const fn of Module.ttReadyQueue || []) fn();
+    },
     onAbort(what) { ended = true; status('Stopped: ' + what, true); },
     onExit(code) { ended = true; status(`The game ended (code ${code}). Reload to start again.`, code !== 0); },
   };
@@ -202,6 +216,7 @@
   canvas.addEventListener('click', () => { canvas.focus(); startAudio().catch((err) => log('[WEB] sound could not start: ' + err)); });
   canvas.focus();
 </script>
+<script src="netplay.js"></script>
 <script src="twotowers_recomp.js"></script>
 </body>
 </html>
