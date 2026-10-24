@@ -2035,13 +2035,7 @@ int xbox_HudWidePlace(float cx, float cy, float *k)
 #else
 #include "nv2a_gl.inc"
 static void gpu_mb_flush(void) { }
-/* (co-op) the head markers' depth probe is answered by the Direct3D 11
- * renderer only (nv2a_d3d11.inc): here no results come (xbox_zprobe_seq
- * stays 0) and the markers are drawn undimmed */
-volatile float xbox_zprobe_req[4][2];
-volatile int xbox_zprobe_n;
-volatile float xbox_zprobe_res[4];
-volatile unsigned xbox_zprobe_seq;
+/* (co-op) the head markers' depth probe: nv2a_gl.inc's gpu_zprobe, as nv2a_d3d11.inc's */
 #endif
 
 static FILE *s_cap_fp;

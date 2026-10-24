@@ -134,6 +134,7 @@ extern void xbox_FramebufferSetGpuOwned(int on);
 GLFUNCS(GLX_DECL)
 #undef GLX_DECL
 static void (APIENTRY *p_glMaxShaderCompilerThreadsKHR)(GLuint);
+static void (APIENTRY *p_glGetBufferSubData)(GLenum, GLintptr, GLsizeiptr, void *);   /* (co-op markers' depth probe: optional) */
 
 #define glViewport p_glViewport
 #define glScissor p_glScissor
@@ -779,6 +780,7 @@ static GLuint g_tex_black;                 /* what a stage reads from a target b
 
 /* the fixed shaders' programs (gpu_init) */
 static GLuint g_pr_copy, g_pr_present, g_pr_fxaa, g_pr_blit, g_pr_clear;
+static GLuint g_pr_zprobe;   /* (co-op markers' depth probe: 0 without it) */
 static GLint g_loc_ys_copy, g_loc_ys_present, g_loc_ys_fxaa, g_loc_ys_blit;
 
 static int gpu_one(uint32_t w, uint32_t h)
@@ -1491,6 +1493,10 @@ static const char s_glsl_ps_tri[] =
 "  vec3 r = (lb < lmin || lb > lmax) ? a : b;\n"
 "  if (post.y > 0.0) r = clamp(r + post.y * 0.3 * (r - 0.25 * (nw + ne + sw + se)), min(m, min(min(nw, ne), min(sw, se))), max(m, max(max(nw, ne), max(sw, se))));\n"
 "  o_color = vec4(post_grade(r), 1.0);\n"
+/* (co-op markers) the zeta surface's depth at one pixel (clear_color.xy), its 24 bits as r g b (gpu_zprobe) */
+"#elif defined(ZPROBE)\n"
+"  uint z = uint(texelFetch(tx0, ivec2(clear_color.xy), 0).r * 16777215.0 + 0.5);\n"
+"  o_color = vec4(float((z >> 16u) & 255u), float((z >> 8u) & 255u), float(z & 255u), 255.0) / 255.0;\n"
 "#else\n"
 "  o_color = texture(tx0, v_uv);\n"
 "#endif\n"
@@ -1744,6 +1750,17 @@ static int gpu_init(void)
     g_pr_clear = gpu_tri_program("", "#define CLEAR\n", NULL, "the clear shader");
     if (!g_pr_copy || !g_pr_present || !g_pr_blit || !g_pr_clear) { SDL_GL_MakeCurrent(g_win, NULL); return 0; }
     if (g_pr_clear) { glUseProgram(g_pr_clear); glUniform1f(glGetUniformLocation(g_pr_clear, "u_ys"), 1.0f); }
+#if defined(__EMSCRIPTEN__)
+    {   /* (WebGL2's own: not among those emscripten_webgl_get_proc_address finds) */
+        extern void emscripten_glGetBufferSubData(GLenum, GLintptr, GLsizeiptr, void *);
+        p_glGetBufferSubData = emscripten_glGetBufferSubData;
+    }
+#else
+    *(void **)&p_glGetBufferSubData = SDL_GL_GetProcAddress("glGetBufferSubData");   /* (the depth probe, gpu_zprobe) */
+#endif
+    if (p_glGetBufferSubData && (g_pr_zprobe = gpu_tri_program("", "#define ZPROBE\n", NULL, "the depth probe shader")))
+        { glUseProgram(g_pr_zprobe); glUniform1f(glGetUniformLocation(g_pr_zprobe, "u_ys"), 1.0f); }
+    fprintf(stderr, "  [GL] depth probe (co-op markers): %s\n", g_pr_zprobe ? "on" : p_glGetBufferSubData ? "off (its shader failed)" : "off (no glGetBufferSubData)");
 
     glGenVertexArrays(1, &g_vao);
     glGenVertexArrays(1, &g_vao_x);
@@ -3283,6 +3300,86 @@ static void gpu_dump_window(const char *nm)
     gpu_sh_reset();
 }
 
+/* Depth probes (a title's HUD mods: twotowers' co-op head markers), as the Direct3D 11 renderer's (nv2a_d3d11.inc):
+ * up to four points in the game's 640x480 frame, set by the game thread each frame; at the flip the depth the
+ * frame's zeta surface holds there is drawn into a 4x1 target (the ZPROBE shader: 24 bits as r g b), read into a
+ * pixel buffer, and that buffer read three flips later, by when the GPU has long finished it: no wait. The results
+ * are the depth as 0..1 (1 = nothing drawn), with xbox_zprobe_seq counting results. (Defined here, not with the
+ * other renderers' in nv2a_pb_exec.c.) */
+volatile float xbox_zprobe_req[4][2];
+volatile int xbox_zprobe_n;
+volatile float xbox_zprobe_res[4];
+volatile unsigned xbox_zprobe_seq;
+#define ZP_RING 4
+static GLuint g_zp_tex, g_zp_pbo[ZP_RING];
+static unsigned g_zp_k, g_zp_have;
+static void gpu_zprobe(GSurf *c)
+{
+    GSurf *z = NULL;
+    int i, n = xbox_zprobe_n;
+    if (!g_pr_zprobe || !c) return;
+    if (g_zp_k >= ZP_RING - 1 && (g_zp_have >> ((g_zp_k - (ZP_RING - 1)) % ZP_RING) & 1u)) {   /* the one from three flips ago */
+        unsigned j = (g_zp_k - (ZP_RING - 1)) % ZP_RING;
+        uint8_t b[16];
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, g_zp_pbo[j]);
+        p_glGetBufferSubData(GL_PIXEL_PACK_BUFFER, 0, 16, b);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+        for (i = 0; i < 4; i++) xbox_zprobe_res[i] = (float)((uint32_t)b[4 * i] << 16 | (uint32_t)b[4 * i + 1] << 8 | b[4 * i + 2]) / 16777215.0f;
+        xbox_zprobe_seq++;
+        g_zp_have &= ~(1u << j);
+    }
+    g_zp_k++;
+    if (n <= 0) return;
+    for (i = 0; i < GSURF_MAX; i++) {   /* the frame's zeta: the depth surface of its size last drawn into */
+        GSurf *t = &g_surf[i];
+        if (t->tex && t->is_depth && t->w == c->w && t->h == c->h && (!z || t->wr > z->wr)) z = t;
+    }
+    if (!z) return;
+    gsurf_resolve(z);   /* (MSAA: the plain texture from its samples) */
+    if (!g_zp_tex) {
+        glGenTextures(1, &g_zp_tex);
+        glBindTexture(GL_TEXTURE_2D, g_zp_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 4, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glGenBuffers(ZP_RING, g_zp_pbo);
+        for (i = 0; i < ZP_RING; i++) {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, g_zp_pbo[i]);
+            glBufferData(GL_PIXEL_PACK_BUFFER, 16, NULL, GL_STREAM_READ);
+        }
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, gpu_fbo(g_zp_tex, 0));
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glBindVertexArray(g_vao_empty);
+    glUseProgram(g_pr_zprobe);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, z->tex);
+    glBindSampler(0, gpu_sampler(3, 3, 0));   /* (nearest: WebGL2 reads a depth-stencil texture filtered linearly as 0) */
+    for (i = 0; i < 4; i++) {   /* one pixel a point (the points beyond n: the first one again) */
+        int k = i < n ? i : 0;
+        float pt[4];
+        pt[0] = xbox_zprobe_req[k][0] * (float)z->pw / (float)z->w; pt[1] = xbox_zprobe_req[k][1] * (float)z->ph / (float)z->h;
+        if (pt[0] < 0) pt[0] = 0;
+        if (pt[1] < 0) pt[1] = 0;
+        if (pt[0] > (float)z->pw - 1) pt[0] = (float)z->pw - 1;
+        if (pt[1] > (float)z->ph - 1) pt[1] = (float)z->ph - 1;
+        pt[2] = pt[3] = 0;
+        gpu_ub(UB_CLC, pt, 16);
+        glViewport(i, 0, 1, 1);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, gpu_fbo(g_zp_tex, 0));
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, g_zp_pbo[(g_zp_k - 1) % ZP_RING]);
+    glReadPixels(0, 0, 4, 1, GL_RGBA, GL_UNSIGNED_BYTE, (void *)0);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    g_zp_have |= 1u << ((g_zp_k - 1) % ZP_RING);
+    gpu_sh_reset();
+}
+
 /* The flip: the finished surface onto the window. */
 static void gpu_present(uint32_t base, uint32_t pitch)
 {
@@ -3310,6 +3407,7 @@ static void gpu_present(uint32_t base, uint32_t pitch)
     if (!g_win || !s) return;
     gsurf_sync_from_mem(s);
     gsurf_resolve(s);   /* (MSAA: the picture from its samples) */
+    gpu_zprobe(s);
     {
         extern int xbox_MoviePlaying(void);
         wide = g_aspect > 1.34f && g_frame_3d && !xbox_MoviePlaying() && g_ws_cam_tick != 0;

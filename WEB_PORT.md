@@ -25,7 +25,11 @@ One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. 
   through a checked access (`postproc_apu_ptr.py`).
 - **Rendering:** the port's OpenGL renderer on WebGL2, on its own thread with the page's canvas handed to it
   (`nv2a_gl.inc`: BGRA swizzles, no base-vertex draws, GLSL ES); fast after three fixes: no growable memory,
-  `glGetError` rarely, every streamed upload a fresh buffer (orphaning) -- from 0.6 to 30 frames/s.
+  `glGetError` rarely, every streamed upload a fresh buffer (orphaning) -- from 0.6 to 30 frames/s. The co-op
+  markers' depth probe (dimmed behind walls), Direct3D 11's only before, is in it too (`gpu_zprobe`: four points of
+  the zeta surface drawn to a 4x1 target, read into a pixel buffer and collected three flips later, no wait; a
+  depth-stencil texture must be sampled nearest, or WebGL2 reads 0). Checked with `TT_COOP_ZPROBELOG=1`: the
+  ground hides the self-test probe under player 1's feet, a head reads its own distance.
 - **Sound:** the APU's output through a ring in shared memory to an AudioWorklet. **Input:** keys to the game's
   key table, pads polled from the Gamepad API by the page. **Files:** the disc and the Ultra textures fetched from
   the dev server in chunks as read (WasmFS fetch backend; its chunking bug fixed in `web/fetch_fix.js`), home and
