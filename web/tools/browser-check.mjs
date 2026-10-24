@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // (web port) Open the game's page in headless Chromium and report what it did.
 //
-//   node web/tools/browser-check.mjs [--seconds 40] [--out DIR] [--url http://localhost:8080/] [KEY=VALUE ...]
+//   node web/tools/browser-check.mjs [--seconds 40] [--out DIR] [--url http://localhost:8080/] [--size 1000x1100] [KEY=VALUE ...]
 //
 // --push FILE:PATH puts a file into the page's storage before the game starts (PATH from the OPFS root: the game
 // sees tt/x as /opfs/tt/x); --pull PATH copies one out into DIR afterwards (a state hash, TT_STATEHASH=/opfs/tt/h.bin).
@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-let seconds = 40, out = null, url = 'http://localhost:8080/', gpu = false;
+let seconds = 40, out = null, url = 'http://localhost:8080/', gpu = false, size = [1000, 1100];
 const pushes = [], pulls = [];
 const query = new URLSearchParams();
 const argv = process.argv.slice(2);
@@ -25,6 +25,7 @@ for (let i = 0; i < argv.length; i++) {
   if (a === '--seconds') seconds = Number(argv[++i]);
   else if (a === '--out') out = path.resolve(argv[++i]);
   else if (a === '--url') url = argv[++i];
+  else if (a === '--size') size = argv[++i].split('x').map(Number);   // (the window, WxH)
   else if (a === '--gpu') gpu = true;
   else if (a === '--push') pushes.push(argv[++i].split(':'));
   else if (a === '--pull') pulls.push(argv[++i]);
@@ -53,7 +54,7 @@ function cachedChromium() {
 // a profile of its own on disk, like a real browser's: an incognito context
 // has a small storage quota, too small for the game's hard-disk images in OPFS
 const browser = await chromium.launchPersistentContext(path.join(out, 'profile'), {
-  executablePath: cachedChromium(), headless: true, viewport: { width: 1000, height: 1100 },
+  executablePath: cachedChromium(), headless: true, viewport: { width: size[0], height: size[1] },
   // --gpu: the machine's GPU (headless Chrome otherwise draws WebGL in software, SwiftShader)
   args: gpu ? ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=' + (process.platform === 'darwin' ? 'metal' : 'default')] : [] });
 const page = browser.pages()[0] ?? await browser.newPage();

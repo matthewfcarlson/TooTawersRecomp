@@ -116,7 +116,8 @@ export default {
       return share(request, env);
     }
     if (url.pathname.startsWith("/share-upload/")) return shareUpload(request, env, url);
-    const shared = url.pathname.replace(/^\/build\//, "/").match(/^\/((?:disc|ultra)-manifest\.json|(?:disc|ultra)\/.+)$/);
+    // (the game's fetches join their folder and the file's path with a slash of their own: disc//default.xbe)
+    const shared = url.pathname.replace(/\/{2,}/g, "/").replace(/^\/build\//, "/").match(/^\/((?:disc|ultra)-manifest\.json|(?:disc|ultra)\/.+)$/);
     if (shared) return sharedFile(request, env, shared[1]);
     if (url.pathname.startsWith("/build/")) return build(request, env);
 

@@ -12,12 +12,33 @@
   :root { --bg: #111; --fg: #ddd; --dim: #888; --warn: #e8a33d; --bad: #e5534b; }
   html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
   main { max-width: 1280px; margin: 0 auto; padding: 16px; }
-  #screen { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; image-rendering: auto; outline: none; }
-  #status { margin: 8px 0; color: var(--dim); }
+  #screen { width: 100%; aspect-ratio: 16 / 9; background: #000; display: block; image-rendering: auto; outline: none; border-radius: 6px; }
+  #status { color: var(--dim); }
   #status.bad, #netplay.bad { color: var(--bad); }
-  #netplay { margin: 4px 0; color: var(--warn); }
+  #netplay { color: var(--warn); }
   #netplay:empty { display: none; }
   details { margin: 8px 0; }
+  /* ---- the play view: the picture as large as the window allows (no scrolling), framed, a slim bar above ---- */
+  body.playing { min-height: 100dvh;
+    background: radial-gradient(120% 70% at 50% -10%, #23283a 0%, #11131b 45%, #07080c 100%) fixed; }
+  body.playing main { max-width: none; padding: 0 16px 16px; }
+  #bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; min-height: 52px; padding: 6px 2px;
+         margin: 0 auto; width: var(--stage-w); box-sizing: border-box; font-size: 13px; }
+  #bar .mark { font-family: Cinzel, serif; font-weight: 600; letter-spacing: .08em; font-size: 16px; white-space: nowrap;
+               background: linear-gradient(180deg, #fff3d1, #e7c77a 55%, #9a7428); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  #bar .spacer { flex: 1; }
+  #bar button { font: 600 12px/1 system-ui, sans-serif; color: #e9e3d4; background: rgba(255,255,255,.06); cursor: pointer;
+                border: 1px solid rgba(231,199,122,.28); border-radius: 999px; padding: 7px 12px; }
+  #bar button:hover, #bar button[aria-pressed="true"] { background: rgba(231,199,122,.14); border-color: rgba(231,199,122,.6); }
+  #bar button:focus-visible { outline: 2px solid #e7c77a; outline-offset: 2px; }
+  #game { --ar: 1.7778; --stage-w: min(100%, calc((100dvh - 76px) * var(--ar))); }
+  #stage { width: var(--stage-w); margin: 0 auto; border-radius: 7px; background: #000;
+           box-shadow: 0 0 0 1px rgba(231,199,122,.32), 0 0 0 5px rgba(7,8,12,.9), 0 0 0 6px rgba(231,199,122,.12),
+                       0 24px 70px rgba(0,0,0,.65), 0 0 120px rgba(231,199,122,.07); }
+  #stage:fullscreen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; border-radius: 0; box-shadow: none; }
+  #stage:fullscreen #screen { width: min(100vw, calc(100vh * var(--ar))); border-radius: 0; }
+  #panel { width: var(--stage-w); margin: 14px auto 0; box-sizing: border-box; }
+  #keys { color: #cfc8b8; background: rgba(13,14,19,.8); border: 1px solid rgba(231,199,122,.2); border-radius: 10px; padding: 4px 14px; }
   kbd { background: #2a2a2a; border-radius: 3px; padding: 0 4px; font-size: 12px; }
   /* ---- the splash: your game files, then Play ---- */
   body:not(.playing) #game { display: none; }
@@ -290,11 +311,19 @@
   </section>
   <div id="game">
   <canvas id="ttmain" width="1" height="1" hidden></canvas>
-  <canvas id="screen" width="640" height="480" tabindex="0"></canvas>
-  <div id="status">Loading…</div>
-  <div id="netplay"></div>
-  <details>
-    <summary>Keys (click the picture first: that also starts the sound)</summary>
+  <div id="bar">
+    <span class="mark">The Two Towers</span>
+    <span id="status">Loading…</span>
+    <span id="netplay"></span>
+    <span class="spacer"></span>
+    <button id="btn-keys" type="button" aria-pressed="false" aria-controls="keys">Keys</button>
+    <button id="btn-log" type="button" aria-pressed="false" aria-controls="log">Log</button>
+    <button id="btn-full" type="button">Fullscreen</button>
+  </div>
+  <div id="stage"><canvas id="screen" width="640" height="480" tabindex="0"></canvas></div>
+  <div id="panel">
+  <div id="keys" hidden>
+    <p>Click the picture first: that also starts the sound.</p>
     <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move ·
        <kbd>K</kbd> A (jump) · <kbd>J</kbd> X (fast attack) · <kbd>I</kbd> Y (fierce attack) · <kbd>L</kbd> B (parry) ·
        <kbd>F</kbd>/<kbd>R</kbd> left/right trigger · <kbd>Enter</kbd> Start · <kbd>Backspace</kbd> Back ·
@@ -302,14 +331,22 @@
     <p>Controllers (Xbox, PlayStation, Switch Pro, …) work too: press a button on one so the browser shows it.</p>
     <p>Settings go in the address: <code>?TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1</code>
        starts in the first level. Any <code>KEY=VALUE</code> becomes one of the game's switches.</p>
-  </details>
-  <pre id="log"></pre>
+  </div>
+  <pre id="log" hidden></pre>
+  </div>
   </div>
 </main>
 <script>
   const statusEl = document.getElementById('status');
   const logEl = document.getElementById('log');
   const canvas = document.getElementById('screen');
+  // the picture's shape, for the canvas and for the stage's size (as large as the window allows)
+  const shape = (w, h) => { canvas.style.aspectRatio = `${w} / ${h}`; document.getElementById('game').style.setProperty('--ar', String(w / h)); };
+  // the bar: the keys, the log, fullscreen (then back to the picture, which takes the keys)
+  const toggle = (btn, el) => { el.hidden = !el.hidden; btn.setAttribute('aria-pressed', String(!el.hidden)); canvas.focus(); };
+  document.getElementById('btn-keys').onclick = (e) => toggle(e.currentTarget, document.getElementById('keys'));
+  document.getElementById('btn-log').onclick = (e) => toggle(e.currentTarget, document.getElementById('log'));
+  document.getElementById('btn-full').onclick = () => { document.getElementById('stage').requestFullscreen?.().catch(() => {}); canvas.focus(); };
   let ctx = null;   // (software renderer only: with WebGL the game's render thread owns the canvas)
   // the game prints a lot (thousands of lines a second while starting):
   // kept in memory, the panel redrawn a few times a second at most
@@ -370,13 +407,13 @@
     print: log,
     printErr: log,
     ttDrawFrame(rgba, w, h) {   // the software renderer's frames
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; canvas.style.aspectRatio = `${w} / ${h}`; }
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; shape(w, h); }
       ctx ??= canvas.getContext('2d');
       ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba.buffer), w, h), 0, 0);
       countFrames(1);
     },
     ttFrames: countFrames,   // WebGL: frames presented, reported in batches
-    ttCanvasSize(w, h) { canvas.style.aspectRatio = `${w} / ${h}`; },   // WebGL: the picture's shape (16:9 by default)
+    ttCanvasSize(w, h) { shape(w, h); },   // WebGL: the picture's shape (16:9 by default)
     ttAudioStart(buf, ptr, frames) {   // the game's sound ring (apu_xaudio2.c)
       audio = { buf, ptr, frames };
       if (gestured) startAudio().catch((err) => log('[WEB] sound could not start: ' + err));   // (a click came first)
