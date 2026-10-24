@@ -133,6 +133,14 @@ Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Off
 deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
 frames compared, to frame 4,860), so what parts it is online only.
 
+**Pausing (2026-10-24):** the game reads Start, and its pause menu's buttons, from player 1's pad only, so online
+player 2's Start is put on player 1's too, and while the game's time is paused (0x4B8B84: the pause menu, a hint)
+so are player 2's D-pad, Back, A and B (`np_net_frame`, tt_netplay.c). Either player's pause opens the same menu on
+both machines on the same frame, and either can work it or resume (checked: `netplay-check.mjs --guest-pause 75`,
+both screens the same pause menu, then both playing on, no desync). A player whose tab stops (in the background, a
+dropped connection) does not part the games: the other one waits for that frame's input ("waiting for the other
+player").
+
 **The courtyard's desync: the game's timer read at real time (fixed 2026-10-24).** First blamed on the sound chip
 (a word that drifts between the machines, 0x818E01E8): wrong. That word is a D3D vertex buffer's `Lock` field,
 stamped with D3D's push-buffer time (device+0x30, +2 a fence), whose count follows each machine's GPU timing; it

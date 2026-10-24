@@ -200,6 +200,19 @@ static void np_net_frame(uint32_t fr)
         s_latched[s_net_role] = local;
         s_latched[1 - s_net_role] = remote;
         s_latched[0].dwPacketNumber = s_latched[1].dwPacketNumber = fr;
+        {   /* Either player pauses: the game reads Start (and its pause menu's buttons) from player 1's pad
+             * only, so player 2's Start goes on player 1's too, and while the game's time is paused (0x4B8B84:
+             * the pause menu, a hint) so do player 2's menu buttons (the D-pad, Start, Back, A, B). Both
+             * machines merge the same two inputs on the same frame by the same game state. */
+            TTPadState *p1 = &s_latched[0];
+            const TTPadState *p2 = &s_latched[1];
+            uint32_t paused = *(const volatile uint32_t *)((uintptr_t)0x4B8B84u + g_xbox_mem_offset);
+            p1->Gamepad.wButtons |= (uint16_t)(p2->Gamepad.wButtons & (paused ? 0x003Fu : 0x0010u));
+            if (paused) {
+                int b;
+                for (b = 0; b < 2; b++) if (p2->Gamepad.bAnalogButtons[b] > p1->Gamepad.bAnalogButtons[b]) p1->Gamepad.bAnalogButtons[b] = p2->Gamepad.bAnalogButtons[b];
+            }
+        }
     }
     {   /* every input the game was given, hashed: told apart from the simulation's
          * own hash, a desync says whether the inputs or the game differed */

@@ -154,6 +154,7 @@ node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profi
 node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
 #   --menus S: the host's pad presses through menus after S s (with TT_COOP_TESTEND: a level's end and on);
 #   --shots S: both players' pictures every S s; --pull PATH: a file from each player's storage (a state hash)
+#   --guest-pause S: the guest's pad presses Start at S s and again 10 s later (either player pauses both)
 node web/tools/together-check.mjs OUT [URL] [ISO]                       # make, share, join and reload a game, as players do
 node web/tools/saves-check.mjs OUT [URL] ISO                            # a shared game's saves: the copy, keep, .zip, a refused copy
 node web/tools/coop-suite.mjs [--only a,b] [--save DIR] [KEY=VALUE ...] # upstream's co-op bot suite in the browser

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // (web port) Two players in two headless Chromes, one online co-op match:
 //
-//   node web/tools/netplay-check.mjs [--seconds 150] [--out DIR] [--match CODE] [--guest-cdp URL] [KEY=VALUE ...]
+//   node web/tools/netplay-check.mjs [--seconds 150] [--out DIR] [--match CODE] [--guest-cdp URL] [--guest-pause S] [KEY=VALUE ...]
 //
 // Needs web/serve.mjs (8080) and the netplay server (web/netplay-server: npm run
 // dev, 8787) running. Each browser has its own profile (its own saves). The
@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-let seconds = 150, out = null, guestCdp = null, menusAt = 0, shotsEvery = 0, pulls = [], match = 'check' + Math.floor(Math.random() * 1e6);
+let seconds = 150, out = null, guestCdp = null, menusAt = 0, guestPause = 0, shotsEvery = 0, pulls = [], match = 'check' + Math.floor(Math.random() * 1e6);
 const query = new URLSearchParams();
 const argv = process.argv.slice(2);
 for (let i = 0; i < argv.length; i++) {
@@ -26,6 +26,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (argv[i] === '--match') match = argv[++i];
   else if (argv[i] === '--guest-cdp') guestCdp = argv[++i];
   else if (argv[i] === '--menus') menusAt = Number(argv[++i]);
+  else if (argv[i] === '--guest-pause') guestPause = Number(argv[++i]);
   else if (argv[i] === '--shots') shotsEvery = Number(argv[++i]);
   else if (argv[i] === '--pull') pulls.push(argv[++i]);
   else if (argv[i].includes('=')) query.append(argv[i].slice(0, argv[i].indexOf('=')), argv[i].slice(argv[i].indexOf('=') + 1));
@@ -79,6 +80,15 @@ async function player(name, scripted, cdp) {
         axes: [walk ? Math.sin(t / 2) * 0.6 : 0, walk ? -0.9 : 0, 0, 0], timestamp: performance.now() }];
     };
   }, menusAt);
+  // --guest-pause S: the guest's pad presses Start at S seconds and again 10 s later (its pause, then on)
+  if (!scripted && guestPause > 0) await page.addInitScript((at) => {
+    const t0 = performance.now();
+    navigator.getGamepads = () => {
+      const t = (performance.now() - t0) / 1000, on = (t > at && t < at + 0.3) || (t > at + 10 && t < at + 10.3);
+      const buttons = Array.from({ length: 17 }, (_, i) => ({ pressed: on && i === 9, touched: on && i === 9, value: on && i === 9 ? 1 : 0 }));
+      return [{ id: 'scripted pad', index: 0, connected: true, mapping: 'standard', buttons, axes: [0, 0, 0, 0], timestamp: performance.now() }];
+    };
+  }, guestPause);
   await page.goto(url);
   return { name, ctx, page, browser };
 }
