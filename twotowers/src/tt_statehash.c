@@ -29,7 +29,10 @@
  * (dir/f<frame>.bmp), to compare two runs by eye at the same moment.
  * TT_STATEHASH_DUMP=dir:f1,f2,... writes all of RAM and the contiguous window
  * at those frames (dir/ram_<frame>.bin, 64 MB each from 0x00010000; then
- * cont_<frame>.bin), to diff two runs word by word where their hashes part.
+ * cont_<frame>.bin), to diff two runs word by word where their hashes part;
+ * with TT_STATEHASH_DUMPPAGES=va,va,... (hex) only those 64 KB pages
+ * (dir/pages_<frame>.bin, in that order: small enough to take out of a
+ * browser).
  * TT_STATEHASH_DUMPDATA=dir:from-to writes the image's .data/.bss
  * (0x0018B6E0-0x008DD998) at every frame from..to (dir/data_<frame>.bin),
  * to find the first word in which two runs part.
@@ -174,12 +177,24 @@ void tt_statehash_frame(uint32_t game_ms)
                 if ((uint32_t)atoi(q) == frame) {
                     char path[512];
                     FILE *d;
+                    const char *pg = getenv("TT_STATEHASH_DUMPPAGES");
+                    if (pg) {   /* TT_STATEHASH_DUMPPAGES=va,va,... (hex): only those 64 KB pages, one after another (pages_<frame>.bin) */
+                        snprintf(path, sizeof path, "%.*s/pages_%05u.bin", (int)(c - dumps), dumps, (unsigned)frame);
+                        if ((d = fopen(path, "wb"))) {
+                            for (; pg && *pg; pg = strchr(pg, ',') ? strchr(pg, ',') + 1 : NULL)
+                                fwrite((const void *)((uintptr_t)(uint32_t)(strtoul(pg, NULL, 16) & ~(SH_PAGE - 1u)) + g_xbox_mem_offset), 1, SH_PAGE, d);
+                            fclose(d);
+                        }
+                        fprintf(stderr, "  [STATEHASH] frame %u: pages dumped\n", (unsigned)frame);
+                        goto next_dump;
+                    }
                     snprintf(path, sizeof path, "%.*s/ram_%05u.bin", (int)(c - dumps), dumps, (unsigned)frame);
                     if ((d = fopen(path, "wb"))) { fwrite((const void *)((uintptr_t)SH_RAM_LO + g_xbox_mem_offset), 1, SH_RAM_HI - SH_RAM_LO, d); fclose(d); }
                     snprintf(path, sizeof path, "%.*s/cont_%05u.bin", (int)(c - dumps), dumps, (unsigned)frame);
                     if ((d = fopen(path, "wb"))) { fwrite((const void *)((uintptr_t)SH_CONT_LO + g_xbox_mem_offset), 1, SH_CONT_HI - SH_CONT_LO, d); fclose(d); }
                     fprintf(stderr, "  [STATEHASH] frame %u dumped\n", (unsigned)frame);
                 }
+            next_dump:
                 q = strchr(q, ',');
                 if (q) q++;
             }

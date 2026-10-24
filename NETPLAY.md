@@ -131,7 +131,15 @@ and saves"), with a fingerprint check before the guest starts.
 Legolas, the host's pad walking and fighting: no desync in nine of the ten levels of the lobby's list; the Hornburg
 Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Offline the same level is
 deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
-frames compared, to frame 4,860), so what parts it is online only: still open.
+frames compared, to frame 4,860), so what parts it is online only. Online it parts every time, in the same order
+(state hashes from both players, `netplay-check.mjs --pull`; the pages that differ dumped with
+`TT_STATEHASH_DUMPPAGES`): from about frame 1,100 one word, 0x818E01E8, differs -- a counter rising about 200 a
+second on both machines, one a constant 146 ahead of the other: the sound chip's progress (187.5 periods a second of
+real time, the APU's clock) as the game sees it; by frame 2,300 it is copied on (0x8255C234) and the game's own
+variables (pages 0x1C0000, 0x420000) differ; the positions by 2,550. So the courtyard waits on a sound (most likely
+a voice line ending) and the sound chip keeps real time on each machine. The fix: the APU in step with the game's
+frames online (each frame's 50 periods made at the frame's boundary, its interrupts handled there), the output
+buffering the bursts.
 
 **The menus in lockstep (2026-10-24, `TT_NETPLAY_MENUS=1`, set by the lobby):** a level's end, its results and
 shops, the save, the mission map and the next level, played on both machines as one. From the first frame of play
