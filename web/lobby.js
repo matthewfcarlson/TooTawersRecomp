@@ -81,6 +81,7 @@
     fill($('together-difficulty'), DIFFICULTY.map((d, i) => [String(i), d]), '1');
     // (the main menu: the game's own menus choose the heroes and the mission, together)
     $('together-start').onchange = () => { $('together-levelopts').hidden = $('together-start').value === 'menu'; };
+    $('together-start').onchange();   // (the main menu by default: no level to pick until "In a level")
     $('together-create').onclick = async () => {
       const err = $('together-error'); err.textContent = '';
       const settings = { start: $('together-start').value, level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
