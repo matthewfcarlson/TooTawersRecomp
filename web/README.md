@@ -70,6 +70,21 @@ the Worker's secret `BUILD_SECRET` (`wrangler secret put BUILD_SECRET` once; `si
 `wrangler dev`); without it the build stays closed. This keeps the translated code from being handed to anyone who
 doesn't have the disc; someone who passes could still copy what their browser downloaded.
 
+**So are online play and the relay.** The same pass opens `/match` (the game server) and `/turn` (credentials for
+Cloudflare's TURN relay, which you pay for past its free 1,000 GB a month): other sites and scripts get neither (the
+cookie is `SameSite=Strict`, sent only by this site's pages). `pass.js` gets it as soon as the disc is in the
+browser, since the lobby talks to the game server before Play. The only page without one that is let in is
+`serve.mjs`'s on this machine, to `wrangler dev`. On top of that (`src/index.js`, `wrangler.jsonc`):
+
+- rate limits (Workers rate limiting, per Cloudflare location and approximate): 3 relay credentials a minute per
+  pass and 10 per address, then STUN only (a direct connection still works); 30 games made or joined a minute per
+  pass; 12 disc checks a minute per address
+- a speed limit on each game-server connection: 128 KB and 100 messages a second, with a burst of 8 MB and 600
+  messages (the host's saves), no message over 512 KB; over it the connection is closed (4008). A game sends about
+  5 KB and 35 messages a second
+- Cloudflare's TURN itself has no speed limit (only a credential's life, 4 hours here): the rate limits keep the
+  credentials few. A spending alert (dashboard: Billing, Notifications) shows any abuse.
+
 The splash (`index.html`, `#setup`) shows on every visit to the hosted page: the disc, the optional Ultra textures,
 then Play (which also counts as the click browsers need before sound starts).
 
@@ -102,8 +117,8 @@ an Xbox save folder `45410010/...` zipped).
 
 **With the switches in the address** (the test tools, and `serve.mjs`): both players open the same address, e.g.
 `http://localhost:8080/?match=night1&TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1&TT_COOP=clone&TT_COOP_P2CHAR=legolas`.
-The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at a deployed
-server, `&ice=relay` allows only the TURN relay (to try it between machines that could connect directly). The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
+The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at another
+server (a deployed one wants the disc pass: test it through its own page, `saves-check.mjs`), `&ice=relay` allows only the TURN relay (to try it between machines that could connect directly). The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
 connection (direct, relayed by TURN, or through the server) and the round trip, and says so if the two games ever
 differ (a desync). Design and status: `../NETPLAY.md`.
 

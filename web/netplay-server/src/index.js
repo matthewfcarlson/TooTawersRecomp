@@ -23,6 +23,21 @@
 // only, nothing of the disc). Only hashes cross the network. Signed with
 // BUILD_SECRET (wrangler secret put; .dev.vars locally, made by site.mjs).
 //
+// The disc pass also opens /match and /turn: the match server and the TURN
+// relay are only for players with the disc, so other sites and scripts get
+// neither (the cookie is SameSite=Strict: only this site's pages send it).
+// The one exception is web/serve.mjs's page on this machine with wrangler dev
+// (http://localhost:8080 to localhost:8787), which has no pass.
+//
+// Limits (the abuse there could be; a game is far below them):
+//   - rate limits (wrangler.jsonc, Workers rate limiting: per Cloudflare
+//     location, approximate): relay credentials per pass and per address,
+//     games made and joined per pass, disc checks per address
+//   - each match connection's speed (Match.allow): bytes and messages a
+//     second, with a burst for the host's saves; over it, closed (4008)
+//   Cloudflare's TURN has no speed limit of its own (only a credential's
+//   life, ttl): the rate limits keep the credentials few.
+//
 // A created game keeps its settings (level, heroes) for the guest's page to
 // take, and its two players' ids, for a week. Without one (an address with
 // the switches in it, the test tools), the first in is the host, as before.
@@ -55,7 +70,23 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { headers: CORS });
 
+    const ip = request.headers.get("CF-Connecting-IP") || "local";
+    if (url.pathname === "/proof" && !(await allowed(env.PROOF_LIMIT, "ip:" + ip)))
+      return Response.json({ error: "too many disc checks from here: wait a minute" }, { status: 429 });
     const m = url.pathname.match(/^\/match\/([A-Za-z0-9_-]{3,32})$/);
+    if (m || url.pathname === "/turn") {
+      const pass = await passOf(request, env);
+      if (!pass && !localPage(request, url))
+        return Response.json({ error: "online play is for players with the disc: import it on the first page" }, { status: 403, headers: CORS });
+      const who = pass || "ip:" + ip;
+      if (url.pathname === "/turn" && request.method === "POST") {
+        if (!(await allowed(env.TURN_LIMIT, who)) || !(await allowed(env.TURN_IP_LIMIT, "ip:" + ip)))   // (STUN still: a direct connection)
+          return Response.json({ iceServers: STUN, turn: false, error: "too many relay requests: wait a minute" }, { status: 429, headers: CORS });
+        return iceServers(env);
+      }
+      if (m && (request.method === "POST" || request.headers.get("Upgrade") === "websocket") && !(await allowed(env.GAME_LIMIT, who)))
+        return Response.json({ error: "too many games made or joined: wait a minute" }, { status: 429, headers: CORS });
+    }
     if (m) {
       // the object is created near whoever opens the match first, and stays there
       const res = await env.MATCH.getByName(m[1].toLowerCase()).fetch(request);
@@ -65,7 +96,6 @@ export default {
       return new Response(res.body, { status: res.status, headers: h });
     }
 
-    if (url.pathname === "/turn" && request.method === "POST") return iceServers(env);
     if (url.pathname === "/proof") return proof(request, env);
     if (url.pathname.startsWith("/build/")) return build(request, env);
 
@@ -96,10 +126,17 @@ function same(a, b) {   // (constant time)
 }
 const now = () => Math.floor(Date.now() / 1000);
 
-async function hasPass(request, env) {
+// the player's pass (its signature: the key its rate limits are counted by), or null
+async function passOf(request, env) {
+  if (!env.BUILD_SECRET) return null;
   const m = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)tt_disc=(\d+)\.([A-Za-z0-9_-]+)/);
-  return !!m && Number(m[1]) > now() && same(m[2], await sign(env, "pass." + m[1]));
+  return m && Number(m[1]) > now() && same(m[2], await sign(env, "pass." + m[1])) ? m[2] : null;
 }
+const hasPass = async (request, env) => !!(await passOf(request, env));
+// web/serve.mjs's page on this machine, to wrangler dev (never so on Cloudflare: the address is the Worker's own)
+const localPage = (request, url) => /^(localhost|127\.0\.0\.1)$/.test(url.hostname) &&
+  /^http:\/\/(localhost|127\.0\.0\.1):8080$/.test(request.headers.get("Origin") || "");
+const allowed = async (limiter, key) => !limiter || (await limiter.limit({ key })).success;
 
 async function proof(request, env) {
   if (!env.BUILD_SECRET || !proofTable.questions?.length)
@@ -133,7 +170,7 @@ async function proof(request, env) {
 }
 
 async function build(request, env) {
-  if (!env.BUILD_SECRET || !(await hasPass(request, env)))
+  if (!(await hasPass(request, env)))
     return new Response("the build is for players with the disc: import it on the first page", { status: 403, headers: { ...ISOLATION, "Cache-Control": "no-store" } });
   const r = await env.ASSETS.fetch(request);
   const h = new Headers(r.headers);
@@ -142,10 +179,10 @@ async function build(request, env) {
   return new Response(r.body, { status: r.status, headers: h });
 }
 
+const STUN = [{ urls: "stun:stun.cloudflare.com:3478" }];
 async function iceServers(env) {
-  const stun = [{ urls: "stun:stun.cloudflare.com:3478" }];
   if (!env.TURN_KEY_ID || !env.TURN_KEY_API_TOKEN)
-    return Response.json({ iceServers: stun, turn: false }, { headers: CORS });
+    return Response.json({ iceServers: STUN, turn: false }, { headers: CORS });
   const r = await fetch(
     `https://rtc.live.cloudflare.com/v1/turn/keys/${env.TURN_KEY_ID}/credentials/generate-ice-servers`,
     {
@@ -154,7 +191,7 @@ async function iceServers(env) {
       body: JSON.stringify({ ttl: 4 * 3600 }),   // a long session's worth
     },
   );
-  if (!r.ok) return Response.json({ iceServers: stun, turn: false, error: r.status }, { headers: CORS });
+  if (!r.ok) return Response.json({ iceServers: STUN, turn: false, error: r.status }, { headers: CORS });
   const body = await r.json();
   // port 53 only works with trickle ICE off the browser's resolver: left out (Cloudflare's advice)
   const servers = (body.iceServers || []).map((s) => ({
@@ -168,7 +205,23 @@ const WEEK = 7 * 86400 * 1000;
 const PLAYER = /^[A-Za-z0-9_-]{8,64}$/;
 const HEROES = /^[a-z]{3,16}$/, LEVEL = /^[0-9]{2}[A-Z]{3,6}[0-9]$/;
 
+// each match connection's speed limit. A game sends about 5 KB and 35 messages a second (the inputs when the data
+// channel cannot connect, the desync checks); the host's saves come all at once (base64, 192 KB a message). A
+// connection may send a burst of BURST, refilled at RATE a second, and no message over BIGGEST
+const BURST = { bytes: 8 << 20, msgs: 600 }, RATE = { bytes: 128 << 10, msgs: 100 }, BIGGEST = 512 << 10;
+
 export class Match extends DurableObject {
+  speed = new Map();   // connection -> {t, bytes, msgs} (in memory: after a hibernation, a full burst again)
+  allow(ws, size) {
+    const t = Date.now() / 1000;
+    let b = this.speed.get(ws);
+    if (!b) this.speed.set(ws, (b = { t, ...BURST }));
+    b.bytes = Math.min(BURST.bytes, b.bytes + (t - b.t) * RATE.bytes) - size;
+    b.msgs = Math.min(BURST.msgs, b.msgs + (t - b.t) * RATE.msgs) - 1;
+    b.t = t;
+    return size <= BIGGEST && b.bytes >= 0 && b.msgs >= 0;
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
     const game = await this.ctx.storage.get("game");   // {settings, host, guest, created} for a created game
@@ -237,10 +290,20 @@ export class Match extends DurableObject {
   // everything a player sends goes to the other one
   async webSocketMessage(ws, message) {
     if (ws.deserializeAttachment()?.replaced) return;
+    if (!this.allow(ws, typeof message === "string" ? message.length : message.byteLength)) {
+      // too fast: told and closed; marked as a replaced connection is (nothing more to or from it), the other told
+      ws.serializeAttachment({ ...ws.deserializeAttachment(), replaced: true });
+      try { ws.send(JSON.stringify({ type: "too-fast" })); ws.close(4008, "too fast"); } catch {}
+      for (const other of this.ctx.getWebSockets())
+        if (other !== ws && !other.deserializeAttachment()?.replaced) other.send(JSON.stringify({ type: "peer-left" }));
+      this.speed.delete(ws);
+      return;
+    }
     for (const other of this.ctx.getWebSockets()) if (other !== ws && !other.deserializeAttachment()?.replaced) other.send(message);
   }
 
   async webSocketClose(ws, code, reason) {
+    this.speed.delete(ws);
     if (ws.deserializeAttachment()?.replaced) return;   // (the same player's new connection took its place: no departure)
     for (const other of this.ctx.getWebSockets())
       if (other !== ws && !other.deserializeAttachment()?.replaced) other.send(JSON.stringify({ type: "peer-left" }));

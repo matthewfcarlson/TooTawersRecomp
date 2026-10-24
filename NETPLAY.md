@@ -153,8 +153,11 @@ Facts from the docs: `turn.cloudflare.com` is anycast (the nearest PoP), credent
 (`generate-ice-servers`, TTL up to 48 h); the SFU supports unordered/unreliable DataChannels per channel; a Durable
 Object is created near its first request and does not move (`locationHint` only on creation); incoming WebSocket
 messages bill at 20:1 as requests; deploys disconnect a DO's WebSockets. **No WebTransport** on Workers/DOs
-(not listed among supported protocols). Not verified: measured latency of TURN or SFU relaying vs direct; how often
-P2P fails in practice (third-party figures: ~10–25% of sessions need TURN).
+(not listed among supported protocols). Measured since: Cloudflare TURN (`?ice=relay`, only the relay allowed; two
+browsers on one machine, the deployed server): 39-57 ms round trip against 53-63 ms direct through the same
+network, 30 frames/s, no desync. Not verified: the SFU; how often P2P fails in practice (third-party figures:
+~10–25% of sessions need TURN). The relay and the match server are only for players with the disc pass, with rate
+and speed limits (`web/README.md`, Hosted): TURN has no speed limit of its own.
 
 **Plan:**
 

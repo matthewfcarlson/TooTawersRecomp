@@ -33,7 +33,7 @@ fs.mkdirSync(path.join(out, 'ultra-support', 'masks'), { recursive: true });
 fs.mkdirSync(path.join(out, 'build'));
 
 const copy = (from, to) => fs.copyFileSync(from, path.join(out, to));
-for (const f of ['index.html', 'netplay.js', 'lobby.js', 'saves.js', 'import.js', 'import-worker.js']) copy(path.join(repo, 'web', f), f);
+for (const f of ['index.html', 'netplay.js', 'lobby.js', 'saves.js', 'pass.js', 'import.js', 'import-worker.js']) copy(path.join(repo, 'web', f), f);
 for (const f of ['twotowers_recomp.js', 'twotowers_recomp.wasm']) {
   if (!fs.existsSync(path.join(build, f))) { console.error(`no ${f} in ${build}: build first (web/build.sh)`); process.exit(1); }
   copy(path.join(build, f), `build/${f}`);

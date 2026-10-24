@@ -6,9 +6,8 @@
 // them (web_platform.c). Nothing is uploaded anywhere.
 //
 // On the hosted page the game's code (build/) is only for players with the
-// disc: the server asks for the SHA-256 of three 64 KB pieces of its files,
-// answered here from the imported copy (only the hashes are sent), and a
-// cookie then opens build/ for 30 days (netplay-server/src/index.js).
+// disc: pass.js answers the server's questions about the imported copy, and
+// its cookie opens build/ (and the match server, and the relay).
 //
 // Then the game starts (build/twotowers_recomp.js). ?TT_WEB_ULTRA_BUILD=<dir> is
 // the Ultra textures' one-time build (web_ultra.cpp): the game's code run
@@ -34,36 +33,7 @@
     const s = document.createElement('script'); s.src = 'build/twotowers_recomp.js'; document.body.append(s);
   };
 
-  // a file of the imported disc (its names as on the disc; any case, as the game asks)
-  async function discFile(rel) {
-    let d = await (await navigator.storage.getDirectory()).getDirectoryHandle('disc');
-    const parts = rel.split('/');
-    const find = async (dir, name, kind) => {
-      try { return kind === 'dir' ? await dir.getDirectoryHandle(name) : await dir.getFileHandle(name); } catch {}
-      for await (const [n, h] of dir.entries()) if (n.toLowerCase() === name.toLowerCase() && h.kind === (kind === 'dir' ? 'directory' : 'file')) return h;
-      throw new Error(`the imported disc has no ${rel}`);
-    };
-    for (const p of parts.slice(0, -1)) d = await find(d, p, 'dir');
-    return (await find(d, parts.at(-1), 'file')).getFile();
-  }
-
-  // the hosted page's disc check: nothing to do if the build is already open to us (or this is web/serve.mjs)
-  async function unlockBuild() {
-    const head = await fetch('build/twotowers_recomp.js', { method: 'HEAD', cache: 'no-store' });
-    if (head.ok) return;
-    if (head.status !== 403) throw new Error(`the game's files could not be loaded (${head.status})`);
-    const ask = await (await fetch('proof', { cache: 'no-store' })).json();
-    if (ask.error) throw new Error(ask.error);
-    const hashes = [];
-    for (const q of ask.ask) {
-      const bytes = await (await discFile(q.path)).slice(q.offset, q.offset + q.length).arrayBuffer();
-      hashes.push([...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((b) => b.toString(16).padStart(2, '0')).join(''));
-    }
-    const r = await fetch('proof', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                     body: JSON.stringify({ exp: ask.exp, ids: ask.ids, mac: ask.mac, hashes }) });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.error || `the disc check failed (${r.status})`);
-  }
+  const unlockBuild = () => self.ttPass.unlock();
 
   async function startGame() {
     const what = $('setup-what');
@@ -123,7 +93,8 @@
     await refresh();
   }
 
-  $('setup-iso').onchange = (e) => e.target.files[0] && guard(() => run({ type: 'iso', file: e.target.files[0] }, 'Copying the disc'));
+  // (then the pass at once: the lobby waits on it to reach the match server)
+  $('setup-iso').onchange = (e) => e.target.files[0] && guard(async () => { await run({ type: 'iso', file: e.target.files[0] }, 'Copying the disc'); await unlockBuild(); });
   // an ISO dropped on the disc's card: as if picked
   const drop = $('step-disc');
   drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });

@@ -18,6 +18,9 @@
 // into them afterwards. Both pages fingerprint the settings, the build and the
 // files, and the guest starts only on the host's fingerprint.
 //
+// The match server is only for players with the disc (pass.js): nothing here
+// asks it anything before ttPass.ready.
+//
 // An address that brings its own switches (TT_TWEAKS, TT_COOP...: the test
 // tools, older links) keeps them: the server's settings only fill what is
 // missing.
@@ -79,6 +82,7 @@
       const err = $('together-error'); err.textContent = '';
       const settings = { level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
                          difficulty: +$('together-difficulty').value, teleport: +$('together-teleport').checked, pickups: +$('together-pickups').checked };
+      if (!ttPass.held) { err.textContent = 'Import your disc first: then you can make a game.'; return; }
       $('together-create').disabled = true;
       try {
         for (let tries = 0; tries < 5; tries++) {
@@ -127,6 +131,7 @@
       $('together-share').onclick = () => navigator.share({ title: 'The Two Towers', text: 'Play The Two Towers with me', url: link(code) }).catch(() => {});
     }
     $('together-leave').href = location.pathname;
+    if (!ttPass.held) $('together-what').textContent = 'Import your disc, and the game shows here.';
     const st = await settingsP;
     const args = self.ttArgs;
     if (st) {
@@ -162,7 +167,7 @@
   const say = (t, bad) => { const el = $('together-files'); el.textContent = t; el.className = bad ? 'bad' : ''; };
 
   // (listening from the start: the server's welcome can come before the settings)
-  const settingsP = code ? fetch(`${base}/match/${encodeURIComponent(code)}`, { cache: 'no-store' })
+  const settingsP = code ? ttPass.ready.then(() => fetch(`${base}/match/${encodeURIComponent(code)}`, { cache: 'no-store' }))
     .then((r) => (r.ok ? r.json() : null)).then((j) => j?.settings ?? null).catch(() => null) : Promise.resolve(null);
   if (code) shareFiles();
   function shareFiles() {

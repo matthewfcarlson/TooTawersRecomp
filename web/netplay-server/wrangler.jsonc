@@ -11,5 +11,12 @@
   "durable_objects": {
     "bindings": [{ "name": "MATCH", "class_name": "Match" }]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Match"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Match"] }],
+  // (src/index.js) per Cloudflare location, approximate; period 10 or 60 s only
+  "ratelimits": [
+    { "name": "TURN_LIMIT", "namespace_id": "2001", "simple": { "limit": 3, "period": 60 } },      // relay credentials, per pass
+    { "name": "TURN_IP_LIMIT", "namespace_id": "2002", "simple": { "limit": 10, "period": 60 } },  // ... per address
+    { "name": "GAME_LIMIT", "namespace_id": "2003", "simple": { "limit": 30, "period": 60 } },     // games made or joined, per pass
+    { "name": "PROOF_LIMIT", "namespace_id": "2004", "simple": { "limit": 12, "period": 60 } }     // disc checks, per address
+  ]
 }
