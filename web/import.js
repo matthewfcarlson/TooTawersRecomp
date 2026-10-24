@@ -9,6 +9,10 @@
 // disc: pass.js answers the server's questions about the imported copy, and
 // its cookie opens build/ (and the match server, and the relay).
 //
+// A hosted site can also share its own copy of the disc and the Ultra
+// textures with whoever has its password (netplay-server, /share): then the
+// game streams them from the site, and nothing needs importing.
+//
 // Then the game starts (build/twotowers_recomp.js). ?TT_WEB_ULTRA_BUILD=<dir> is
 // the Ultra textures' one-time build (web_ultra.cpp): the game's code run
 // for that alone, then back here.
@@ -34,6 +38,9 @@
   };
 
   const unlockBuild = () => self.ttPass.unlock();
+  // the site's copy: {open: the site shares one, held: this browser has the password's pass}; on web/serve.mjs, null
+  let share = null;
+  const shareState = () => fetch('share', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 
   async function startGame() {
     const what = $('setup-what');
@@ -68,10 +75,12 @@
   }
 
   async function refresh() {
-    const disc = await opfsHas('disc/.complete'), ultra = await opfsHas('ultra/textures_ultra/built.txt');
+    const own = await opfsHas('disc/.complete'), shared = !!share?.held, disc = own || shared;
+    const ultra = shared || await opfsHas('ultra/textures_ultra/built.txt');
     const pack = await opfsHas('ultra/.pack-complete');
-    $('setup-disc-state').textContent = disc ? 'imported ✓' : 'not imported yet';
-    $('setup-ultra-state').textContent = ultra ? 'built ✓' : pack ? 'copied, not built yet' : 'not imported (optional)';
+    $('setup-disc-state').textContent = shared ? "the site's copy ✓" : own ? 'imported ✓' : 'not imported yet';
+    $('setup-ultra-state').textContent = shared ? "the site's copy ✓" : ultra ? 'built ✓' : pack ? 'copied, not built yet' : 'not imported (optional)';
+    $('share-form').hidden = !share?.open || shared;
     $('setup-build').hidden = !pack || ultra;
     $('setup-play').disabled = !disc || self.ttLobbyBlocked;
     $('step-disc').classList.toggle('done', disc);
@@ -125,6 +134,19 @@
     const s = await w.createWritable(); await s.write(`${files.length} files\n`); await s.close();
   });
 
+  // the site's password: its pass opens the build and the site's copy (the game streams it: web_platform.c)
+  $('share-form').onsubmit = (e) => {
+    e.preventDefault();
+    guard(async () => {
+      const r = await fetch('share', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify({ password: $('share-password').value }) });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(body.error || `the password could not be checked (${r.status})`);
+      $('share-password').value = '';
+      share = await shareState();
+      await unlockBuild();
+    });
+  };
   $('setup-build').onclick = () => { location.search = '?TT_WEB_ULTRA_BUILD=/local/ultra'; };
   $('setup-play').onclick = startGame;
   $('setup-forget').onclick = () => guard(async () => {
@@ -150,9 +172,11 @@
     }
     // your machine's server with your disc (web/serve.mjs): straight into the game; the hosted page: the splash,
     // with Play once the disc is in (that click also lets the sound start)
-    if (await serverHas('disc-manifest.json')) return startGame();
+    // (the hosted site's own copy, for its password's holders, is a choice on the splash like an imported disc)
+    share = await shareState();
+    if (!share && await serverHas('disc-manifest.json')) return startGame();
     // a co-op game restarting after a reload (netplay.js): back into it at once
-    if (q.get('match') && sessionStorage.getItem('tt-autostart') === q.get('match') && await opfsHas('disc/.complete')) {
+    if (q.get('match') && sessionStorage.getItem('tt-autostart') === q.get('match') && (share?.held || await opfsHas('disc/.complete'))) {
       sessionStorage.removeItem('tt-autostart');
       return startGame();
     }

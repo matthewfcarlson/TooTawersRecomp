@@ -213,6 +213,10 @@ if(EMSCRIPTEN)
         "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/../web/node_prejs.js"
         -sASSERTIONS=1 --profiling-funcs)
     set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".js")
+    # (web port) the JS linked in: a change to one links again
+    set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY LINK_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/../web/opfs_fix.js" "${CMAKE_CURRENT_SOURCE_DIR}/../web/fetch_fix.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../web/node_prejs.js")
 endif()
 
 # MSVC-specific: large address aware, increase section limit for big generated files

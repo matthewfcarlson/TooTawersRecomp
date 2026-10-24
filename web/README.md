@@ -90,6 +90,28 @@ browser, since the lobby talks to the game server before Play. The only page wit
 The splash (`index.html`, `#setup`) shows on every visit to the hosted page: the disc, the optional Ultra textures,
 then Play (which also counts as the click browsers need before sound starts).
 
+**The site's own copy, behind a password (optional).** A hosted site can also keep a copy of the disc and the Ultra
+textures in R2 (the bucket `twotowers-files`, binding `FILES`) for whoever knows its password: the splash then shows
+"Or this site's password" under the disc, and the right one gives the disc pass and a share pass (30 days). With it
+the game streams both from the site as it reads them (the same way it does from `serve.mjs`: a manifest, then
+ranges), nothing to import; importing your own disc still works the same. Without the share pass the copy's addresses
+are a 404. The password is compared as an HMAC in constant time, 12 tries a minute per address; a new password ends
+every share pass given for the old one. Streamed files are kept in the tab's memory up to 768 MB (`fetch_fix.js`),
+then the least recently read are dropped.
+
+```sh
+# once: R2 on in the dashboard, then
+(cd web/netplay-server && npx wrangler r2 bucket create twotowers-files)
+(cd web/netplay-server && npx wrangler secret put SHARE_PASSWORD)   # the players' password (typed at its prompt)
+(cd web/netplay-server && npx wrangler secret put UPLOAD_SECRET)    # the uploader's (a long random one)
+(cd web/netplay-server && npm run deploy)
+TT_UPLOAD_SECRET=... node web/tools/share-upload.mjs                # isos/extracted and textures/ (GLOS69, built
+                                                                    # textures_ultra): about 11 GB; --ultra off for the
+                                                                    # disc alone; again after a stop: it goes on
+```
+
+The copy is the game itself: anyone with the password can play it without owning the disc.
+
 ## Online co-op (in progress)
 
 ```sh

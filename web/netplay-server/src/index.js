@@ -15,6 +15,19 @@
 //   POST /proof          the answers: a cookie that opens /build/ (30 days)
 //   GET  /build/*        the build (the game's code, translated from the
 //                        disc): only with that cookie
+//   GET  /share          {open, held}: whether this site shares its own copy
+//                        of the disc and Ultra textures, and whether this
+//                        browser holds the password's pass
+//   POST /share          {password}: right, the disc pass and the share pass
+//                        (30 days; a new SHARE_PASSWORD ends them all)
+//   GET  /disc-manifest.json, /disc/*, /ultra-manifest.json, /ultra/* (and
+//                        the same under /build/, where the game asks): the
+//                        site's copy, from R2 (FILES), with ranges -- only
+//                        with the share pass; for anyone else not here, so
+//                        the game reads its player's own imported disc
+//   /share-upload/<key>  (Authorization: Bearer UPLOAD_SECRET) the copy put
+//                        in R2: HEAD, PUT, and a multipart upload for the big
+//                        files (web/tools/share-upload.mjs)
 //
 // The proof: the build is only for players who have the disc. The page has
 // it in the browser's storage (import.js); the questions are SHA-256 hashes of
@@ -97,6 +110,14 @@ export default {
     }
 
     if (url.pathname === "/proof") return proof(request, env);
+    if (url.pathname === "/share") {
+      if (request.method === "POST" && !(await allowed(env.PROOF_LIMIT, "ip:" + ip)))
+        return Response.json({ error: "too many tries from here: wait a minute" }, { status: 429 });
+      return share(request, env);
+    }
+    if (url.pathname.startsWith("/share-upload/")) return shareUpload(request, env, url);
+    const shared = url.pathname.replace(/^\/build\//, "/").match(/^\/((?:disc|ultra)-manifest\.json|(?:disc|ultra)\/.+)$/);
+    if (shared) return sharedFile(request, env, shared[1]);
     if (url.pathname.startsWith("/build/")) return build(request, env);
 
     // (the site's files are answered before this, web/site.mjs; anything else is not here -- the page asks for
@@ -177,6 +198,99 @@ async function build(request, env) {
   for (const [k, v] of Object.entries(ISOLATION)) h.set(k, v);
   h.set("Cache-Control", "private, max-age=3600");   // (never a shared cache: it is only for this player)
   return new Response(r.body, { status: r.status, headers: h });
+}
+
+// ---- the site's own copy, behind a password (SHARE_PASSWORD; the files in R2, FILES) ----
+// The share pass is signed with a tag of the password, so a new password ends every pass given for the old one.
+const SHARE_COOKIE = "tt_share";
+const sharing = (env) => !!(env.SHARE_PASSWORD && env.FILES && env.BUILD_SECRET);
+const pwTag = async (env, pw) => (await sign(env, "pw." + pw)).slice(0, 16);
+async function hasShare(request, env) {
+  if (!sharing(env)) return false;
+  const m = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)tt_share=(\d+)\.([A-Za-z0-9_-]+)/);
+  return !!m && Number(m[1]) > now() && same(m[2], await sign(env, `share.${m[1]}.${await pwTag(env, env.SHARE_PASSWORD)}`));
+}
+
+async function share(request, env) {
+  const nostore = { "Cache-Control": "no-store" };
+  if (request.method === "GET") return Response.json({ open: sharing(env), held: await hasShare(request, env) }, { headers: nostore });
+  if (request.method !== "POST") return new Response("GET or POST", { status: 405 });
+  if (!sharing(env)) return Response.json({ error: "this site does not share a copy" }, { status: 404 });
+  let body;
+  try { body = await request.json(); } catch { body = null; }
+  // (compared as signatures: the same length whatever was typed, in constant time)
+  if (typeof body?.password !== "string" || !same(await pwTag(env, body.password), await pwTag(env, env.SHARE_PASSWORD)))
+    return Response.json({ error: "that is not the password" }, { status: 403, headers: nostore });
+  const until = now() + PASS_TTL, attrs = `Path=/; Max-Age=${PASS_TTL}; HttpOnly; Secure; SameSite=Strict`;
+  const h = new Headers(nostore);
+  h.append("Set-Cookie", `${COOKIE}=${until}.${await sign(env, "pass." + until)}; ${attrs}`);
+  h.append("Set-Cookie", `${SHARE_COOKIE}=${until}.${await sign(env, `share.${until}.${await pwTag(env, env.SHARE_PASSWORD)}`)}; ${attrs}`);
+  return Response.json({ ok: true, until }, { headers: h });
+}
+
+// a file of the copy: the disc's and the pack's names in lower case (the game asks so; share-upload.mjs puts them so)
+async function sharedFile(request, env, path) {
+  const notHere = () => new Response("not found", { status: 404, headers: { ...ISOLATION, "Cache-Control": "no-store" } });
+  if (!["GET", "HEAD"].includes(request.method) || path.includes("..") || !(await hasShare(request, env))) return notHere();
+  const key = path.endsWith("-manifest.json") ? path : path.toLowerCase();
+  const h = new Headers({ ...ISOLATION, "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=604800" });
+  if (request.method === "HEAD") {   // (the fetch backend's first look: the whole size, whatever range it names)
+    const o = await env.FILES.head(key);
+    if (!o) return notHere();
+    o.writeHttpMetadata(h);
+    h.set("Content-Length", String(o.size));
+    return new Response(null, { status: 200, headers: h });
+  }
+  const o = await env.FILES.get(key, { range: request.headers });
+  if (!o) return notHere();
+  o.writeHttpMetadata(h);
+  if (request.headers.has("Range") && o.range) {
+    const off = o.range.offset ?? (o.range.suffix !== undefined ? o.size - o.range.suffix : 0);
+    const len = o.range.length ?? (o.size - off);
+    h.set("Content-Range", `bytes ${off}-${off + len - 1}/${o.size}`);
+    h.set("Content-Length", String(len));
+    return new Response(o.body, { status: 206, headers: h });
+  }
+  h.set("Content-Length", String(o.size));
+  return new Response(o.body, { status: 200, headers: h });
+}
+
+// putting the copy in R2 (web/tools/share-upload.mjs): small files in one PUT, big ones in parts (a request's body
+// is at most 100 MB)
+async function shareUpload(request, env, url) {
+  const auth = (request.headers.get("Authorization") || "").replace(/^Bearer /, "");
+  if (!env.UPLOAD_SECRET || !env.FILES || !same(await sign(env, "up." + auth), await sign(env, "up." + env.UPLOAD_SECRET)))
+    return Response.json({ error: "not allowed" }, { status: 403 });
+  const key = decodeURIComponent(url.pathname.slice("/share-upload/".length));
+  if (!/^((disc|ultra)-manifest\.json|(disc|ultra)\/[a-z0-9_.\/ -]+)$/.test(key) || key.includes(".."))
+    return Response.json({ error: "bad key" }, { status: 400 });
+  const id = url.searchParams.get("uploadId");
+  if (request.method === "HEAD") {
+    const o = await env.FILES.head(key);
+    return new Response(null, { status: o ? 200 : 404, headers: o ? { "X-Size": String(o.size) } : {} });
+  }
+  if (request.method === "PUT" && !id) {
+    await env.FILES.put(key, request.body);
+    return Response.json({ ok: true });
+  }
+  if (request.method === "POST" && url.searchParams.has("uploads")) {
+    const u = await env.FILES.createMultipartUpload(key);
+    return Response.json({ uploadId: u.uploadId });
+  }
+  if (id) {
+    const u = env.FILES.resumeMultipartUpload(key, id);
+    if (request.method === "PUT") {
+      const part = await u.uploadPart(Number(url.searchParams.get("partNumber")), request.body);
+      return Response.json(part);
+    }
+    if (request.method === "POST") {
+      const { parts } = await request.json();
+      await u.complete(parts);
+      return Response.json({ ok: true });
+    }
+    if (request.method === "DELETE") { await u.abort(); return Response.json({ ok: true }); }
+  }
+  return new Response("bad request", { status: 400 });
 }
 
 const STUN = [{ urls: "stun:stun.cloudflare.com:3478" }];
