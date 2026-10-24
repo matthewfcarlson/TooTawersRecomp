@@ -399,7 +399,14 @@ static void twotowers_setup_paths_and_log(void)
     /* DirectSound's effect-image download (0x0012C0FF) posts command 3 in the
      * DSP scratch block and spins until the DSP clears it; the DSP is a stub
      * here, so the runtime completes that word for it. */
-    if (!getenv("RECOMP_DSP_ACK")) _putenv_s("RECOMP_DSP_ACK", "0x82E90810");
+    if (!getenv("RECOMP_DSP_ACK")) {
+        /* (web port) The scratch block follows the game's heap in the contiguous
+         * window: a bigger heap (TT_GAME_HEAP_MB, src/tt_heap.c) moves it as far. */
+        extern uint32_t tt_game_heap_size(void);
+        char ack[16];
+        snprintf(ack, sizeof ack, "0x%08X", 0x82E90810u + (tt_game_heap_size() - 0x2000000u));
+        _putenv_s("RECOMP_DSP_ACK", ack);
+    }
 
     /* The Xbox has one CPU. The game's own bookkeeping (e.g. the profiler
      * at 0x000E60B0, shared by the main and loader threads) is not
