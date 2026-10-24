@@ -198,21 +198,30 @@
   let signals = Promise.resolve();   // (signalling messages handled in the order they came)
   // (the match server is only for players with the disc: once pass.js has its pass)
   if (self.ttPass && !self.ttPass.held) state.path = 'waiting for the disc check';
-  (self.ttPass?.ready ?? Promise.resolve()).then(connect);
-  function connect() {
-    const ws = state.ws = new WebSocket(`${server}/match/${encodeURIComponent(code)}` + (self.ttPlayerId ? `?player=${self.ttPlayerId()}` : ''));
+  (self.ttPass?.ready ?? Promise.resolve()).then(() => connect(false));
+  // (a connection the server dropped -- a deploy drops them all -- is made again, as a resume: the other page goes
+  // on, where a player's return restarts the level; the inputs lost meanwhile come again with the next ones)
+  let retry = 1000;
+  function connect(resume) {
+    const q = [self.ttPlayerId ? `player=${self.ttPlayerId()}` : '', resume ? 'resume=1' : ''].filter(Boolean).join('&');
+    const ws = state.ws = new WebSocket(`${server}/match/${encodeURIComponent(code)}` + (q ? `?${q}` : ''));
     ws.binaryType = 'arraybuffer';
     ws.onmessage = (e) => {
       if (typeof e.data !== 'string') return receive(e.data);   // relayed inputs
       const m = JSON.parse(e.data);
       queueMicrotask(() => tell(m));
       if (m.type === 'welcome') {
+        retry = 1000;
         state.role = m.role;
         self.ttRememberRole?.(m.role);
         ready(() => Module._tt_np_set_role(m.role === 'guest' ? 1 : 0));
         state.path = m.peer ? 'connecting to the other player' : 'waiting for the other player';
         log(`joined as the ${m.role}`); show();
         if (m.peer) { peerIn = true; startPeer(); }
+      } else if (m.type === 'peer-joined' && m.resume) {   // (their connection again, the game going on)
+        peerIn = true; log('the other player\'s connection is back');
+        if (state.relay) { state.path = 'connected through the server (relay)'; show(); }
+        startPeer();
       } else if (m.type === 'peer-joined') {
         // they came back to a game under way here: start again together. (Not a game still at its start, waiting
         // for them -- the page that just restarted for them is one: it would send them round again.)
@@ -223,16 +232,21 @@
       } else if (m.type === 'replaced') {   // (this browser opened the game again elsewhere: that one plays)
         state.replaced = true; ws.close(); state.dc?.close(); state.pc?.close();
         state.path = 'this game was opened in another tab or window'; show(); log(state.path);
-      } else if (m.type === 'too-fast') {   // (the server's speed limit: far above what a game sends)
+      } else if (m.type === 'too-fast') {   // (the server's speed limit: far above what a game sends; not made again)
+        state.full = true;
         state.path = 'the server closed this connection: it was sending too much'; show(); log(state.path);
       } else if (m.type === 'full') {
+        state.full = true;
         state.path = 'this game already has its two players'; show();
       } else if (m.type === 'signal') signals = signals.then(() => onSignal(m)).catch((e) => log('signalling: ' + e.message));
       else if (m.type === 'hash') { theirHashes.set(m.frame, m.h); compare(m.frame); }
     };
     ws.onclose = (e) => {
-      if (state.replaced) return;
-      if (!state.relay || state.dc?.readyState !== 'open') { state.path += ' (server connection closed)'; show(); }
+      if (state.replaced || state.full || state.ws !== ws) return;
+      if (!state.relay || state.dc?.readyState !== 'open') { state.path = 'the server connection was lost: connecting again'; show(); }
+      log(`the server connection closed (${e.code}): again in ${retry / 1000} s`);
+      setTimeout(() => connect(true), retry);
+      retry = Math.min(retry * 2, 10000);
     };
   }
   show();

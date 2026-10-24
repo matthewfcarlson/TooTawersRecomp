@@ -726,7 +726,8 @@ static void tt_frametime(void)
         extern int tt_netplay_tick_kind(void);
         int kind = fake > 0.0f ? tt_netplay_tick_kind() : -1;
         if (kind >= 0) {
-            float fake_ms = kind ? fake : 0.0f;
+            extern float tt_netplay_step(float fixed);
+            float fake_ms = kind ? tt_netplay_step(fake) : 0.0f;   /* (outside play, with the menus in lockstep: half) */
             float fs = fake_ms * 0.001f; uint32_t w;
             memcpy(&w, &fake_ms, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
             memcpy(&w, &fs, 4); if (MEM32(0x4B8BA0u)) MEM32(0x4B8BA0u) = w;

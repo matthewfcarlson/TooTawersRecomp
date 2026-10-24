@@ -206,16 +206,22 @@
             <div class="together">
               <div>
                 <div class="sub">Make a game</div>
-                <label class="field">Level <select id="together-level"></select></label>
-                <div class="pair">
-                  <label class="field">You (player 1) <select id="together-p1"></select></label>
-                  <label class="field">Your friend <select id="together-p2"></select></label>
+                <label class="field">Start <select id="together-start">
+                  <option value="level">In a level</option>
+                  <option value="menu">At the main menu: load your save, then on together</option>
+                </select></label>
+                <div id="together-levelopts">
+                  <label class="field">Level <select id="together-level"></select></label>
+                  <div class="pair">
+                    <label class="field">You (player 1) <select id="together-p1"></select></label>
+                    <label class="field">Your friend <select id="together-p2"></select></label>
+                  </div>
                 </div>
                 <label class="field">Difficulty <select id="together-difficulty"></select></label>
                 <label class="check"><input type="checkbox" id="together-teleport" checked> Player 2 jumps to player 1 when far behind</label>
                 <label class="check"><input type="checkbox" id="together-pickups" checked> Double pickups (each can be taken twice)</label>
                 <button class="btn" id="together-create">Make a game and get its link</button>
-                <p class="quiet" style="margin-top:10px">So far only Weathertop has been tested in co-op.</p>
+                <p class="quiet" style="margin-top:10px">Tested online so far: every level for four minutes (the Hornburg Courtyard can still part the two games), and through a level's end into the next.</p>
               </div>
               <div>
                 <div class="sub">Join a game</div>
@@ -307,7 +313,7 @@
   let logDirty = false;
   const keyLines = [];   // the lines worth keeping whatever scrolls past (web/tools read them)
   let allLines = null;   // ?TT_WEB_LOGALL=1: every line, taken in batches by web/tools/coop-suite.mjs
-  const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|NETPLAY|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
+  const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|NETPLAY|NPKIND|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
   function log(text) {
     if (KEY.test(text) && keyLines.length < 2000) keyLines.push(text);
     lines.push(text);

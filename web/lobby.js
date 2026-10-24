@@ -41,7 +41,8 @@
   const name = (h) => h[0].toUpperCase() + h.slice(1);
   const levelName = (c) => (LEVELS.find(([k]) => k === c) || [c, c])[1];
   const DIFFICULTY = ['Easy', 'Normal', 'Expert'];
-  const describe = (st) => `${name(st.p1)} & ${name(st.p2)} · ${levelName(st.level)} · ${DIFFICULTY[st.difficulty ?? 1]}`;
+  const describe = (st) => st.start === 'menu' ? `From the main menu · ${DIFFICULTY[st.difficulty ?? 1]}`
+    : `${name(st.p1)} & ${name(st.p2)} · ${levelName(st.level)} · ${DIFFICULTY[st.difficulty ?? 1]}`;
 
   const store = {
     get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -78,9 +79,11 @@
     fill($('together-p1'), HEROES.map((h) => [h, name(h)]), 'aragorn');
     fill($('together-p2'), HEROES.map((h) => [h, name(h)]), 'legolas');
     fill($('together-difficulty'), DIFFICULTY.map((d, i) => [String(i), d]), '1');
+    // (the main menu: the game's own menus choose the heroes and the mission, together)
+    $('together-start').onchange = () => { $('together-levelopts').hidden = $('together-start').value === 'menu'; };
     $('together-create').onclick = async () => {
       const err = $('together-error'); err.textContent = '';
-      const settings = { level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
+      const settings = { start: $('together-start').value, level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
                          difficulty: +$('together-difficulty').value, teleport: +$('together-teleport').checked, pickups: +$('together-pickups').checked };
       if (!ttPass.held) { err.textContent = 'Import your disc first: then you can make a game.'; return; }
       $('together-create').disabled = true;
@@ -137,16 +140,22 @@
     if (st) {
       settingsKnown = st;
       remember(code, st);
-      args.TT_TWEAKS ??= `SKIPMAINMENU=1;HERO=${st.p1};LEVEL=${st.level}`;
-      args.TT_COOP ??= 'clone';
-      args.TT_COOP_P2CHAR ??= st.p2;
+      // the menus in lockstep too (tt_netplay.c): a level's end, its shops and the next level together; from the
+      // main menu, the whole way (Co-op, Load Game, the save, the heroes, the mission)
+      args.TT_NETPLAY_MENUS ??= '1';
+      if (st.start === 'menu') args.TT_NETPLAY_FROM ??= 'menu';
+      else {
+        args.TT_TWEAKS ??= `SKIPMAINMENU=1;HERO=${st.p1};LEVEL=${st.level}`;
+        args.TT_COOP ??= 'clone';
+        args.TT_COOP_P2CHAR ??= st.p2;
+      }
       // the host's co-op settings, not this player's ini; player 2 is the friend, never the bot
       args.TT_COOP_DIFFICULTY ??= String(st.difficulty ?? 1);
       args.TT_COOP_TELEPORT ??= String(st.teleport ?? 1);
       args.TT_COOP_PICKUPS ??= String(st.pickups ?? 1);
       args.TT_COOP_P2BOT = '0';
       $('together-what').textContent = describe(st);
-    } else if (args.TT_TWEAKS || args.TT_COOP) {
+    } else if (Object.keys(args).some((k) => /^TT_/.test(k))) {   // (the test tools: an address with the game's own switches)
       $('together-what').textContent = 'the settings in this address';
     } else {
       $('together-what').textContent = '';

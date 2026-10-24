@@ -680,6 +680,10 @@ static HANDLE bridge_take_handle(uint32_t token);
 volatile uint32_t g_movie_handle;   /* open .bik file, 0 when none */
 extern const wchar_t *xbox_LastHostPath(void);
 int xbox_MoviePlaying(void) { return g_movie_handle != 0; }
+/* (netplay) a film playing: not the death movie each level opens ahead of its game-over camera, open the whole
+ * level and closed when it ends, at no fixed moment of the game's own */
+static volatile int g_movie_death;
+int xbox_FilmPlaying(void) { return g_movie_handle != 0 && !g_movie_death; }
 static void bridge_NtClose(void)
 {
     uint32_t raw_handle = STACK_ARG(0);
@@ -3256,7 +3260,7 @@ static void bridge_NtCreateFile(void)
             /* (testing, coop-anything) TT_SKIPMOVIES: the movie reported missing, so bot runs don't sit through it
              * (the levels' preloaded death movie kept: the game-over death cam uses it). The host handle is left open. */
             if (getenv("TT_SKIPMOVIES") && !wcsstr(w, L"death") && !wcsstr(w, L"DEATH")) { g_eax = 0xC0000034u; fprintf(stderr, "  [MOVIE] skipped (TT_SKIPMOVIES)\n"); }
-            else g_movie_handle = BRIDGE_MEM32(handle_va);
+            else { g_movie_handle = BRIDGE_MEM32(handle_va); g_movie_death = wcsstr(w, L"death") || wcsstr(w, L"DEATH"); }
         }
     }
 

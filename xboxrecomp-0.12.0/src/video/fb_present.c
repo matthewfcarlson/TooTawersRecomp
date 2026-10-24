@@ -812,6 +812,7 @@ int xbox_FramebufferHasFocus(void) { return s_focus; }
 volatile int xbox_fb_hide_cursor;
 /* left and right clicks so far (a click between two of the title's looks at the buttons still counts) */
 volatile LONG xbox_fb_clicks[2];
+extern volatile int xbox_input_netplay;   /* (online: xinput_device.c) */
 volatile LONG xbox_fb_wheel;   /* mouse wheel notches, up positive (counted; readers keep their own last value) */
 static volatile int s_mouse_x = -1, s_mouse_y = -1, s_mouse_in, s_win_w = 1, s_win_h = 1;
 int xbox_FramebufferMouse(float *fx, float *fy)
@@ -1284,11 +1285,13 @@ sdl_failed:
                 s_mouse_x = e.motion.x; s_mouse_y = e.motion.y; s_mouse_in = 1;
                 break;
             case SDL_MOUSEWHEEL:
+                if (xbox_input_netplay) break;   /* (online: the mouse is this machine's alone, and would part the two games' menus) */
                 InterlockedExchangeAdd(&xbox_fb_wheel, e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y);
                 break;
             case SDL_MOUSEBUTTONDOWN:
             case SDL_MOUSEBUTTONUP: {
                 int down = e.type == SDL_MOUSEBUTTONDOWN, vk = 0;
+                if (xbox_input_netplay) break;
                 switch (e.button.button) {
                 case SDL_BUTTON_LEFT: vk = VK_LBUTTON; break;
                 case SDL_BUTTON_RIGHT: vk = VK_RBUTTON; break;

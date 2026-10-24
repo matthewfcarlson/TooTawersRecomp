@@ -49,7 +49,7 @@
 // Inside a match (JSON text messages, binary relayed as is):
 //   server -> client  {type:"welcome", role:"host"|"guest", peer:bool, settings}
 //                     {type:"replaced"}   the same player connected again elsewhere
-//                     {type:"peer-joined"} / {type:"peer-left"}
+//                     {type:"peer-joined"[, resume:true]} / {type:"peer-left"}
 //   client -> other   {type:"signal", ...}   SDP and ICE candidates
 //                     {type:"hash", ...}     desync checks
 //                     {type:"start", ...}    the host's level, heroes, start
@@ -239,7 +239,7 @@ export class Match extends DurableObject {
       // the co-op settings that change the game (options.c: difficulty 0-2, player 2's teleport, double pickups):
       // the host's, for both games (each player's own ini would make two different games)
       const flag = (v, max, def) => (Number.isInteger(v) && v >= 0 && v <= max ? v : def);
-      const settings = { level: st.level, p1: st.p1, p2: st.p2,
+      const settings = { start: st.start === "menu" ? "menu" : "level", level: st.level, p1: st.p1, p2: st.p2,
                          difficulty: flag(st.difficulty, 2, 1), teleport: flag(st.teleport, 1, 1), pickups: flag(st.pickups, 1, 1) };
       await this.ctx.storage.put("game", { settings, host: body.player, guest: null, created: Date.now() });
       await this.ctx.storage.setAlarm(Date.now() + WEEK);
@@ -281,7 +281,9 @@ export class Match extends DurableObject {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ role, player });
     server.send(JSON.stringify({ type: "welcome", role, peer: sockets.length === 1, settings: game?.settings ?? null }));
-    for (const other of sockets) other.send(JSON.stringify({ type: "peer-joined" }));
+    // (?resume=1: the same page's connection again after the server dropped it -- a deploy -- not a return: its game goes on)
+    const resume = url.searchParams.get("resume") === "1";
+    for (const other of sockets) other.send(JSON.stringify(resume ? { type: "peer-joined", resume: true } : { type: "peer-joined" }));
     return new Response(null, { status: 101, webSocket: client });
   }
 

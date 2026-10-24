@@ -161,6 +161,7 @@ NP_EXPORT void tt_np_remote(int frame, int buttons, int a0123, int a4567, int lx
     __atomic_store_n(&s_remote[k].frame, (uint32_t)frame, __ATOMIC_RELEASE);
 }
 
+static int np_in_play(void) { uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset); return st == 6 || st == 8; }
 static uint32_t np_pack(const uint8_t *a) { return (uint32_t)a[0] | (uint32_t)a[1] << 8 | (uint32_t)a[2] << 16 | (uint32_t)a[3] << 24; }
 
 static void np_net_frame(uint32_t fr)
@@ -210,7 +211,7 @@ static void np_net_frame(uint32_t fr)
         for (i = 0; i < sizeof s_latched[1].Gamepad; i++) ih = (ih ^ b[i]) * 16777619u;
         s_input_hash = ih;
     }
-    if (fr % 30 == 0) {   /* the desync check */
+    if (fr % 30 == 0 && np_in_play()) {   /* the desync check (in play: its hash is the actors', which outside a level are what freed memory holds) */
         extern uint64_t tt_statehash_sim(void);
         uint64_t h = tt_statehash_sim();
         (void)h;
@@ -235,7 +236,7 @@ static int np_latch(tt_np_dword port, TTPadState *state)
  * in play -- frames in play since start-up times the step, the same on both
  * machines however long each one's loading took -- and the wall clock
  * otherwise, as before. */
-static volatile uint32_t s_play_frames;
+static volatile uint32_t s_play_frames, s_menu_frames;   /* (TT_NETPLAY_MENUS: those outside play, half the step) */
 uint32_t tt_timer_caller;           /* where the frame timer was called from (sub_000E3350's return address) */
 volatile uint32_t tt_frame_waits;   /* the game's waits for the next frame (sub_000E00E0): one a frame shown */
 
@@ -254,27 +255,84 @@ volatile uint32_t tt_frame_waits;   /* the game's waits for the next frame (sub_
  * frame their real time (they draw the loading screen only).
  * Returns 1 (a frame), 0 (no time), -1 (real time). */
 static int s_level_started, s_tick_kind = -1;
+/* (netplay) TT_NETPLAY_MENUS=1: the menus in lockstep too. From the first frame of play on, every frame the game
+ * shows is one of the session's -- in a level, its menus and shops, the next level -- counted on without a break,
+ * with both players' input and the fixed step; none but a load's: the level load's wait (0x0007C234: its loading
+ * screen, as many frames as the machine is fast: real time, uncounted) and a film's (decoded as fast as the
+ * machine plays it: the same; not the death movie a level keeps open, xbox_FilmPlaying). The game's state
+ * between two such stretches is the same on both machines, so the count goes on from the same moment. The port's
+ * own menu code keeps the session's time too (tt_ui_ms), and the mouse is left out (fb_present.c). */
+static int s_menus = -1, s_synced;
+static int np_menus(void)
+{
+    if (s_menus < 0) { const char *e = getenv("TT_NETPLAY_MENUS"); s_menus = e && *e && *e != '0'; }
+    return s_menus;
+}
+/* TT_NETPLAY_FROM=menu: the session from the main menu's first frame (front-end screen 4), not play's: both games
+ * boot on their own, then go through the menus together (Load Game, a save, the mission) */
+static int np_from_menu(void)
+{
+    static int f = -1;
+    if (f < 0) { const char *e = getenv("TT_NETPLAY_FROM"); f = np_menus() && e && !strcmp(e, "menu"); }
+    return f;
+}
+/* a frame's step: the fixed step in play (30 frames/s); half outside it, where the menus draw 60 */
+float tt_netplay_step(float fixed)
+{
+    uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset);
+    return s_synced && st != 6 && st != 8 ? fixed * 0.5f : fixed;
+}
 void tt_netplay_tick(uint32_t caller)   /* (each tick, first: sub_000E3350 with its return address) */
 {
     static uint32_t last_waits;
     uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset), w = tt_frame_waits;
     tt_timer_caller = caller;
-    if (st != 6 && st != 8) { s_level_started = 0; s_tick_kind = -1; }
+    if (st != 6 && st != 8 && (s_synced || (st == 4 && np_from_menu()))) {   /* (TT_NETPLAY_MENUS: outside play, once the session began) */
+        extern int xbox_FilmPlaying(void);
+        int mv = xbox_FilmPlaying();
+        s_level_started = 0;
+        s_tick_kind = caller == 0x0007C234u || mv ? -1 : w != last_waits ? 1 : 0;
+        {   /* (each change of what the ticks are, outside play) */
+            static int lk = 2; static uint32_t lc, lst;
+            if (s_tick_kind != lk || st != lst || (s_tick_kind != 1 && caller != lc))
+                fprintf(stderr, "  [NPKIND] after frame %u: %s (state %u, called from %08X%s)\n", s_frame,
+                        s_tick_kind == 1 ? "frames" : s_tick_kind ? "real time, uncounted" : "no time", st, caller, mv ? ", a movie" : "");
+            lk = s_tick_kind; lc = caller; lst = st;
+        }
+    }
+    else if (st != 6 && st != 8) { s_level_started = 0; s_tick_kind = -1; }
     else if (w != last_waits && caller != 0x0007C234u) { s_level_started = 1; s_tick_kind = 1; }
     else s_tick_kind = s_level_started ? 0 : -1;
     last_waits = w;
 }
 int tt_netplay_tick_kind(void) { return s_tick_kind; }
-uint32_t tt_clock_ms(void)
+static uint32_t np_real_ms(void)
 {
-    static double step = -1.0;
-    if (step < 0.0) { const char *e = getenv("TT_FAKE_FRAME_MS"); step = e ? atof(e) : 0.0; }
-    if (step > 0.0) return (uint32_t)((double)s_play_frames * step);
 #if defined(_WIN32)
     { extern __declspec(dllimport) unsigned long __stdcall GetTickCount(void); return (uint32_t)GetTickCount(); }
 #else
     { extern uint32_t GetTickCount(void); return GetTickCount(); }
 #endif
+}
+/* (netplay) the clock of the port's own menu code (menus.c, options.c: key repeats, pages shown a while, presses
+ * it makes itself): with the menus in lockstep (TT_NETPLAY_MENUS), from the first frame of play on, the session's
+ * time -- its frames times the step, the same on both machines -- carried on from the real clock's reading then;
+ * the real clock otherwise */
+uint32_t tt_ui_ms(void)
+{
+    extern uint32_t tt_clock_ms(void);
+    static uint32_t base;
+    static int based;
+    if (!s_synced) return np_real_ms();
+    if (!based) { base = np_real_ms() - tt_clock_ms(); based = 1; }
+    return base + tt_clock_ms();
+}
+uint32_t tt_clock_ms(void)
+{
+    static double step = -1.0;
+    if (step < 0.0) { const char *e = getenv("TT_FAKE_FRAME_MS"); step = e ? atof(e) : 0.0; }
+    if (step > 0.0) return (uint32_t)((double)s_play_frames * step + (double)s_menu_frames * step * 0.5);
+    return np_real_ms();
 }
 
 /* the frame in play now (0: not in play), for the state hash and the network */
@@ -284,7 +342,7 @@ void tt_netplay_frame(void)
 {
     static int on = -1;
     uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset);
-    if (s_tick_kind == 1) s_play_frames++;   /* (tt_clock_ms) */
+    if (s_tick_kind == 1) { if (s_synced && st != 6 && st != 8) s_menu_frames++; else s_play_frames++; }   /* (tt_clock_ms) */
     if (on < 0) {
         const char *sc = getenv("TT_NETINPUT_SCRIPT"), *net = getenv("TT_NETPLAY");
         on = 0;
@@ -331,7 +389,14 @@ void tt_netplay_frame(void)
         }
     }
     if (!on) return;
-    if (st != 6 && st != 8) { s_frame = 0; return; }
+    if (np_menus()) {   /* (the session's frames, from the first in play or the main menu's: tt_netplay_tick) */
+        if (!s_synced) {
+            if (s_tick_kind != 1 || !(st == 6 || st == 8 || (st == 4 && np_from_menu()))) return;
+            s_synced = 1;
+            fprintf(stderr, "  [NETPLAY] the session begins: %s\n", st == 4 ? "the main menu" : "play");
+        }
+    }
+    else if (st != 6 && st != 8) { s_frame = 0; return; }
     if (s_tick_kind != 1) return;   /* (a load's tick: the frame's input stays latched) */
     s_frame++;
     if (s_net) np_net_frame(s_frame);

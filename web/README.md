@@ -30,7 +30,9 @@ Rendering is WebGL2 (the port's OpenGL renderer, on its own thread with the canv
 the levels run at the game's 30 frames/s, or 60 with `?TT_FPS=60` (upstream's experimental mode; it holds 60 in
 the levels tried, `../WEB_PORT.md`). The picture is 16:9 by default (the game's Options -> Display -> Aspect ratio, or
 `[Display] aspect` in the ini; the canvas takes its shape). `?RECOMP_RENDERER=software` uses the CPU renderer
-instead (a few frames/s in a level), `?TT_WEB_SIZE=1920x1080` sets the canvas's resolution (default 960 lines).
+instead (a few frames/s in a level), `?TT_WEB_SIZE=1920x1080` sets the canvas's resolution (default 960 lines). The
+game draws at the canvas's size (its 480 lines times the canvas's lines / 480; `?RECOMP_RENDER_SCALE=1` the game's
+own 480): the Ultra textures need it (at 480 lines scaled up they hardly show).
 
 **Ultra textures** (the GameCube high-resolution pack, GLOS69, downloaded separately): unpack its `GLOS69` folder
 into `textures/` at the repository's root, copy the port's `twotowers/tools/ultra_textures/{masks,recipe.txt,pairs.txt}`
@@ -95,8 +97,9 @@ then Play (which also counts as the click browsers need before sound starts).
 node web/serve.mjs
 ```
 
-**On the hosted page** (the splash's "Play together", `lobby.js`): the host picks the level and the two heroes and
-makes a game; the server keeps those settings and the page shows its link, `…/?match=fell-7k2q`, to copy or share.
+**On the hosted page** (the splash's "Play together", `lobby.js`): the host picks where to start -- in a level
+(which, and the two heroes), or at the main menu (Co-op, Load Game, a save of the host's, the heroes and the mission
+chosen in the game's own menus, together) -- and makes a game; the server keeps those settings and the page shows its link, `…/?match=fell-7k2q`, to copy or share.
 The friend opens the link (or types the code), and their game takes the settings from the server, so the two cannot
 start differently. Each browser keeps a player id (localStorage): the maker is always player 1, the first other
 player player 2 for good, a third is turned away, and a reload or the link opened again gets the same role back. A
@@ -120,7 +123,9 @@ an Xbox save folder `45410010/...` zipped).
 The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at another
 server (a deployed one wants the disc pass: test it through its own page, `saves-check.mjs`), `&ice=relay` allows only the TURN relay (to try it between machines that could connect directly). The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
 connection (direct, relayed by TURN, or through the server) and the round trip, and says so if the two games ever
-differ (a desync). Design and status: `../NETPLAY.md`.
+differ (a desync). Design and status: `../NETPLAY.md`. The menus run in lockstep too (`TT_NETPLAY_MENUS=1`, the
+lobby's games): a level's end, its shops and the next level, played together. A connection the server drops (a
+deploy drops them all) is made again, and the game goes on.
 
 ### Two machines
 
@@ -144,8 +149,11 @@ the signalling still come through the tunnel).
 ```sh
 node web/run-node.mjs --seconds 60 TT_SHOTS=20000:@out/a.bmp       # the same build under Node, no window; frames to BMP
 node web/tools/browser-check.mjs --seconds 40 [KEY=VALUE ...]       # headless Chromium on the running server
+#   --push FILE:PATH into the page's storage first (tt/x is the game's /opfs/tt/x), --pull PATH out after
 node web/tools/profile.mjs --warmup 50 --seconds 15 [KEY=VALUE ...]  # CPU profile of every worker, time per function
 node web/tools/netplay-check.mjs --seconds 150 [KEY=VALUE ...]        # two headless players in one online match
+#   --menus S: the host's pad presses through menus after S s (with TT_COOP_TESTEND: a level's end and on);
+#   --shots S: both players' pictures every S s; --pull PATH: a file from each player's storage (a state hash)
 node web/tools/together-check.mjs OUT [URL] [ISO]                       # make, share, join and reload a game, as players do
 node web/tools/saves-check.mjs OUT [URL] ISO                            # a shared game's saves: the copy, keep, .zip, a refused copy
 node web/tools/coop-suite.mjs [--only a,b] [--save DIR] [KEY=VALUE ...] # upstream's co-op bot suite in the browser

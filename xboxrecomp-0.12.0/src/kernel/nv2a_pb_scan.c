@@ -631,6 +631,13 @@ static void nv2a_pb_run_(uint32_t put_phys, uint32_t init_get_phys)
     if (raw_on < 0) raw_on = !getenv("RECOMP_PB_NO_RAW");
     raw = raw_on && s_async > 0 && s_exec_enabled && !inventory && !trace;
     if (trace) fprintf(stderr, "  [PBFLOW] run GET %08X -> PUT %08X\n", s_get, put);
+    /* (web port, netplay) a jump the walk comes back to again and again without reaching PUT: the title's
+     * placeholder, a jump to itself that it is about to write past (seen when a kick from another thread -- the
+     * vblank's -- came while the game thread was blocked between frames: one machine waiting for the other online).
+     * The console's GPU would circle there until the CPU wrote on; here the walk stops at the jump and the next
+     * kick goes on from it -- skipping to PUT dropped the fence the title then waited on for good */
+    uint32_t loop_at = 0, loop_n = 0;
+    int looping = 0;
     while (s_get != put && words < 0x200000u) {
         uint32_t w;
         if (s_get < XBOX_CONTIG_BASE || s_get >= XBOX_CONTIG_BASE + 0x04000000u - 4u) {
@@ -657,6 +664,7 @@ static void nv2a_pb_run_(uint32_t put_phys, uint32_t init_get_phys)
         words++;
 
         if ((w & 3u) == 1u) {                               /* jump */
+            if (s_get == loop_at) { if (++loop_n >= 3) { looping = 1; break; } } else { loop_at = s_get; loop_n = 0; }
             FLOW_NOTE(s_get, w);
             if (trace) fprintf(stderr, "  [PBFLOW] %08X jump %08X\n", s_get, w & ~3u);
             if (!PB_TARGET_OK(XBOX_CONTIG_BASE | (w & 0x0FFFFFFCu))) { words = 0x200000u; break; }
@@ -754,6 +762,11 @@ static void nv2a_pb_run_(uint32_t put_phys, uint32_t init_get_phys)
                 words++;
             }
         }
+    }
+    if (looping) {
+        static int said;
+        if (said++ < 8) fprintf(stderr, "  [PB] the push buffer loops at %08X short of PUT %08X: waiting for the title to write on\n", s_get, put);
+        return;
     }
     if (s_get != put) {
         unsigned k;

@@ -25,6 +25,9 @@
 #include "tt_env.h"   /* (1.9.3) getenv looked up once per name */
 #include <string.h>
 #include <math.h>
+/* (netplay) this file's timing on the session's clock while the menus run in lockstep (tt_netplay.c) */
+extern uint32_t tt_ui_ms(void);
+#define GetTickCount tt_ui_ms
 
 extern ptrdiff_t xbox_GetMemoryOffset(void);
 #define G8(a)  (*(volatile uint8_t *)(xbox_GetMemoryOffset() + (uint32_t)(a)))

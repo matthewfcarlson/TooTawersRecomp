@@ -127,6 +127,38 @@ heroes' records (`heroes/records.dat`, read when player 2 is Gandalf, Boromir...
 starts from one. A hosted game now takes all of them from the host (`web/README.md`, "One game, the host's settings
 and saves"), with a fingerprint check before the guest starts.
 
+**Every level, four minutes each (2026-10-24):** online (two headless Chromes, the server's relay), Aragorn and
+Legolas, the host's pad walking and fighting: no desync in nine of the ten levels of the lobby's list; the Hornburg
+Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Offline the same level is
+deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
+frames compared, to frame 4,860), so what parts it is online only: still open.
+
+**The menus in lockstep (2026-10-24, `TT_NETPLAY_MENUS=1`, set by the lobby):** a level's end, its results and
+shops, the save, the mission map and the next level, played on both machines as one. From the first frame of play
+(or of the main menu: `TT_NETPLAY_FROM=menu`) every frame the game shows is one of the session's, counted on
+without a break, with both players' input and the fixed step -- half the step outside play, where the menus draw 60
+frames/s -- except the level load's wait (its loading screen: as many frames as the machine is fast) and a film's
+(not the death movie a level keeps open the whole level). The port's own menu code (`menus.c`, `options.c`: key
+repeats, pages up a while, presses it makes itself) keeps the session's time (`tt_ui_ms`), the mouse is left out
+online, and the desync check hashes in play only (outside a level the actors' hash is what freed memory holds).
+Checked with `netplay-check.mjs --menus` (the host's pad presses through the menus by the front-end screen the game
+logs; both players' pictures every 30 s, `--shots`): every run showed the two machines on the same screen at the
+same moment, through the results (frame 694), Aragorn's and Legolas' shops, "save game to hard disk", the mission
+map, a second level and its pause menu, each screen change at the same frame on both. Two things found on the way:
+the options pages timed by the wall clock parted the games (fixed, `tt_ui_ms`); and twice in about fifteen runs one
+machine stopped a few frames into a new screen (694 -> 699, 1,226 -> 1,231), its game thread waiting on the GPU
+while the emulated GPU had walked into a jump to itself in the push buffer (`[PB] GPU fetch lost its place`,
+`nv2a_pb_scan.c`) and skipped ahead past what the game waited for. Six single-player runs through the same
+level end showed nothing of it. The walk now stops at such a loop and the next kick goes on from it (a GPU would
+circle there until the CPU wrote on); not yet confirmed, the stall being rare. From the main menu too
+(`TT_NETPLAY_FROM=menu`, the game started with no level): the title, its films, New Game, the Prologue played,
+the title's difficulty and the credits, the same on both machines throughout.
+
+**A dropped server connection (2026-10-24):** the page connects again (1, 2, 4... up to 10 s), as a resume
+(`?resume=1`): the other page goes on, where a player's return restarts the level; the inputs lost meanwhile come
+again with the next ones (each packet carries the last eight frames, and the last ones go again every second).
+Checked by stopping the local server 70 s into a game relayed through it: both went on.
+
 Next steps for determinism: longer play, other levels, a level's end and the next level's load, saves and
 checkpoints; then what the other threads write into game memory on real-time
 schedules -- the kernel timer thread runs guest code (the vblank interrupt, sound interrupts, D3D callbacks, timer

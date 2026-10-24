@@ -401,6 +401,7 @@ static void web_ShaderSource(GLuint sh, GLsizei n, const GLchar *const *src, con
 #define glShaderSource web_ShaderSource
 
 /* the context, on the page's canvas (this thread owns it) */
+static int s_web_lines;   /* (the canvas's height: the default render scale, its lines over the game's 480) */
 static void *web_gl_context(void)
 {
     EmscriptenWebGLContextAttributes a;
@@ -417,6 +418,7 @@ static void *web_gl_context(void)
     a.powerPreference = EM_WEBGL_POWER_PREFERENCE_HIGH_PERFORMANCE;
     a.enableExtensionsByDefault = 1;
     emscripten_set_canvas_element_size("#screen", w, h);
+    s_web_lines = h;
     s_webgl = emscripten_webgl_create_context("#screen", &a);
     MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttCanvasSize) Module.ttCanvasSize($0, $1); }, w, h);   /* (the page's box takes its shape) */
     if (s_webgl <= 0) { fprintf(stderr, "  [GL] no WebGL2 context on #screen (%d)\n", (int)s_webgl); return NULL; }
@@ -1777,6 +1779,10 @@ static int gpu_init(void)
         g_msaa = xbox_GfxMsaa();
         if (g_msaa > 1) fprintf(stderr, "  [GL] MSAA %dx\n", g_msaa);
         g_rsf = rs ? (float)atof(rs) : 1.0f;
+#if defined(__EMSCRIPTEN__)
+        /* (web port) drawn at the canvas's own size, not the game's 480 lines scaled up (the Ultra textures need it) */
+        if (!rs && s_web_lines > 480) g_rsf = (float)s_web_lines / 480.0f;
+#endif
         if (!(g_rsf >= 1.0f)) g_rsf = 1.0f;
         if (g_rsf > 12.0f) g_rsf = 12.0f;
         g_rs = (int)g_rsf;
