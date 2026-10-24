@@ -234,17 +234,17 @@ async function sharedFile(request, env, path) {
   const notHere = () => new Response("not found", { status: 404, headers: { ...ISOLATION, "Cache-Control": "no-store" } });
   if (!["GET", "HEAD"].includes(request.method) || path.includes("..") || !(await hasShare(request, env))) return notHere();
   const key = path.endsWith("-manifest.json") ? path : path.toLowerCase();
-  const h = new Headers({ ...ISOLATION, "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=604800" });
+  const h = new Headers({ ...ISOLATION, "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=604800",
+    // (the lists as text: without a type Firefox's XMLHttpRequest tries them as XML and logs a parsing error)
+    "Content-Type": key.endsWith("-manifest.json") ? "text/plain; charset=utf-8" : "application/octet-stream" });
   if (request.method === "HEAD") {   // (the fetch backend's first look: the whole size, whatever range it names)
     const o = await env.FILES.head(key);
     if (!o) return notHere();
-    o.writeHttpMetadata(h);
     h.set("Content-Length", String(o.size));
     return new Response(null, { status: 200, headers: h });
   }
   const o = await env.FILES.get(key, { range: request.headers });
   if (!o) return notHere();
-  o.writeHttpMetadata(h);
   if (request.headers.has("Range") && o.range) {
     const off = o.range.offset ?? (o.range.suffix !== undefined ? o.size - o.range.suffix : 0);
     const len = o.range.length ?? (o.size - off);
