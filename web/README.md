@@ -103,7 +103,7 @@ an Xbox save folder `45410010/...` zipped).
 **With the switches in the address** (the test tools, and `serve.mjs`): both players open the same address, e.g.
 `http://localhost:8080/?match=night1&TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1&TT_COOP=clone&TT_COOP_P2CHAR=legolas`.
 The first in is the host (player 1), the second the guest (player 2); `&server=wss://...` points at a deployed
-server. The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
+server, `&ice=relay` allows only the TURN relay (to try it between machines that could connect directly). The game runs in lockstep at a fixed step with 3 frames of input delay; the line under the status shows the
 connection (direct, relayed by TURN, or through the server) and the round trip, and says so if the two games ever
 differ (a desync). Design and status: `../NETPLAY.md`.
 

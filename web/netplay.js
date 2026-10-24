@@ -142,7 +142,8 @@
   const earlyCandidates = [];
   function startPeer() { return (peerMade ??= makePeer()); }
   async function makePeer() {
-    const pc = state.pc = new RTCPeerConnection({ iceServers: await iceServers() });
+    // ?ice=relay: TURN only (to try the relay between two machines that could connect directly)
+    const pc = state.pc = new RTCPeerConnection({ iceServers: await iceServers(), iceTransportPolicy: q.get('ice') === 'relay' ? 'relay' : 'all' });
     const dc = state.dc = pc.createDataChannel('inputs', { negotiated: true, id: 0, ordered: false, maxRetransmits: 0 });
     dc.binaryType = 'arraybuffer';
     dc.onopen = async () => {
