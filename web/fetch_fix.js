@@ -18,6 +18,13 @@
 //
 // FIX 3: what is being fetched, told to the page (a BroadcastChannel,
 // "tt-loading": {inflight, bytes}) for its loading bar.
+//
+// FIX 4: read-ahead. The game's reads wait for their chunk; streamed from a
+// site, each new 4 MB was a round trip and a download in the middle of a film
+// or of play (frames held for a sixth of a second and more). A file read in
+// order -- a film, a streamed sound bank, a level's files -- now has its next
+// AHEAD chunks fetched in the background, and a read that finds its chunk on
+// the way waits for that fetch instead of making another.
 addToLibrary({
   $wasmFS$fetchCache: { cap: 768 * 1024 * 1024, bytes: 0, lru: new Map() },   // key "file:chunk" -> bytes, oldest first
   _wasmfs_create_fetch_backend_js__deps: [
@@ -60,6 +67,30 @@ addToLibrary({
         if (wasmFS$JSMemoryRanges[f]) wasmFS$JSMemoryRanges[f].chunks[i] = undefined;
       }
     }
+    // (FIX 4) chunks on the way: "file:chunk" -> a promise (resolved once that chunk is in the cache); each file's
+    // last chunk read, to tell reads in order from jumps
+    var AHEAD = 2, pending = new Map(), lastRead = {};
+    function fetchAhead(file, url, first, last) {
+      var r = wasmFS$JSMemoryRanges[file], cs = r.chunkSize, start = first * cs, end = Math.min(r.size, (last + 1) * cs);
+      if (start >= end) return;
+      var p = get(url, {headers: {'Range': `bytes=${start}-${end - 1}`}}).then((bytes) => {
+        if (wasmFS$JSMemoryRanges[file] !== r) return;   // (freed meanwhile)
+        for (var i = first; i <= last && i * cs - start < bytes.length; i++) {
+          if (!r.chunks[i]) { r.chunks[i] = bytes.slice(i * cs - start, (i + 1) * cs - start); keep(file, i, r.chunks[i].byteLength); }
+        }
+        trim(file, first, last);
+      }, () => {}).finally(() => { for (var i = first; i <= last; i++) pending.delete(file + ':' + i); });
+      for (var i = first; i <= last; i++) pending.set(file + ':' + i, p);
+    }
+    function readAhead(file, url, first, last) {
+      var r = wasmFS$JSMemoryRanges[file], prev = lastRead[file];
+      lastRead[file] = last;
+      if (!r || r.chunks.length === 1 && r.chunkSize === r.size) return;   // (a whole file: nothing after it)
+      if (prev === undefined || first < prev || first > prev + 1) return;   // (not in order)
+      var n = Math.ceil(r.size / r.chunkSize), from = last + 1, to = Math.min(n - 1, last + AHEAD);
+      while (from <= to && (r.chunks[from] || pending.has(file + ':' + from))) from++;
+      if (from <= to) fetchAhead(file, url, from, to);
+    }
     async function getFileRange(file, offset, len) {
       var url = '';
       var fileUrl = UTF8ToString(__wasmfs_fetch_get_file_url(file));
@@ -100,7 +131,16 @@ addToLibrary({
       for (i = firstChunk; i <= lastChunk; i++) {
         if (!wasmFS$JSMemoryRanges[file].chunks[i]) { allPresent = false; break; }
       }
-      if (allPresent) { for (i = firstChunk; i <= lastChunk; i++) keep(file, i, wasmFS$JSMemoryRanges[file].chunks[i].byteLength); return; }
+      if (!allPresent) {   // (FIX 4) on the way already: wait for those fetches
+        var waits = [];
+        for (i = firstChunk; i <= lastChunk; i++) if (!wasmFS$JSMemoryRanges[file].chunks[i] && pending.has(file + ':' + i)) waits.push(pending.get(file + ':' + i));
+        if (waits.length) {
+          await Promise.all(waits);
+          allPresent = true;
+          for (i = firstChunk; i <= lastChunk; i++) if (!wasmFS$JSMemoryRanges[file]?.chunks[i]) { allPresent = false; break; }
+        }
+      }
+      if (allPresent) { for (i = firstChunk; i <= lastChunk; i++) keep(file, i, wasmFS$JSMemoryRanges[file].chunks[i].byteLength); readAhead(file, url, firstChunk, lastChunk); return; }
       var start = firstChunk * chunkSize;
       var end = (lastChunk + 1) * chunkSize;
       var bytes = await get(url, {headers: {'Range': `bytes=${start}-${end - 1}`}});
@@ -109,6 +149,7 @@ addToLibrary({
         keep(file, i, wasmFS$JSMemoryRanges[file].chunks[i].byteLength);
       }
       trim(file, firstChunk, lastChunk);
+      readAhead(file, url, firstChunk, lastChunk);
     }
 
     wasmFS$backends[backend] = {
