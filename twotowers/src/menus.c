@@ -62,6 +62,9 @@ static int exit_on(void)
 {
     static int on = -1;
     if (on < 0) { const char *e = getenv("TT_NOEXIT"); on = !(e && *e && *e != '0'); }
+#if defined(__EMSCRIPTEN__)
+    if (!getenv("TT_NOEXIT")) on = 0;   /* (web port) a browser tab has nothing to exit to: no Exit unless TT_NOEXIT=0 */
+#endif
     return on;
 }
 

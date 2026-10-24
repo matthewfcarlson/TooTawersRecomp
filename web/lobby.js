@@ -72,9 +72,37 @@
   const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
   const fill = (sel, items, value) => { sel.innerHTML = ''; for (const [v, t] of items) sel.append(new Option(t, v, false, v === value)); };
 
+  // ---- solo or together (the splash's big choice; remembered): Enter Middle-earth does what it says ----
+  // Together, outside a game: a code or link in the join box joins it, else a game is made with the settings shown;
+  // either way the page opens the game's address and goes straight in (import.js: tt-autostart). In a game's
+  // address it is together; choosing solo there leaves the game.
+  let createGame = null;
+  const joinCode = () => $('together-code').value.trim().toLowerCase().replace(/^.*[?&]match=/, '').replace(/[^a-z0-9_-]/g, '');
+  const go = (c) => { try { sessionStorage.setItem('tt-autostart', c); } catch {} location.search = `?match=${encodeURIComponent(c)}`; };
+  let mode = code ? 'together' : store.get('tt-mode', 'solo') === 'together' ? 'together' : 'solo';
+  function showMode() {
+    $('mode-solo').setAttribute('aria-checked', String(mode === 'solo'));
+    $('mode-together').setAttribute('aria-checked', String(mode === 'together'));
+    if (!code) $('together-new').hidden = mode !== 'together';
+    else $('together-game').hidden = false;
+    dispatchEvent(new Event('tt-mode'));   // (import.js: the note under Enter Middle-earth)
+  }
+  $('mode-solo').onclick = () => {
+    if (code) { if (confirm('Leave this co-op game and play solo?')) location.href = location.pathname; return; }
+    mode = 'solo'; store.set('tt-mode', mode); showMode();
+  };
+  $('mode-together').onclick = () => { mode = 'together'; store.set('tt-mode', mode); showMode(); };
+  // (import.js, at Enter Middle-earth: true when this went to a game's address instead, which then starts by itself)
+  self.ttPlayChoice = async () => {
+    if (code || mode !== 'together') return false;
+    const c = joinCode();
+    if (c) { go(c); return true; }
+    return createGame ? await createGame() : false;
+  };
+  self.ttPlayMode = () => (code ? 'together' : mode);
+
   // ---- no game in the address: make one, join one, or come back to one ----
   function lobby() {
-    $('together-new').hidden = false;
     fill($('together-level'), LEVELS, '01WEAT1');
     fill($('together-p1'), HEROES.map((h) => [h, name(h)]), 'aragorn');
     fill($('together-p2'), HEROES.map((h) => [h, name(h)]), 'legolas');
@@ -82,12 +110,11 @@
     // (the main menu: the game's own menus choose the heroes and the mission, together)
     $('together-start').onchange = () => { $('together-levelopts').hidden = $('together-start').value === 'menu'; };
     $('together-start').onchange();   // (the main menu by default: no level to pick until "In a level")
-    $('together-create').onclick = async () => {
+    createGame = async () => {
       const err = $('together-error'); err.textContent = '';
       const settings = { start: $('together-start').value, level: $('together-level').value, p1: $('together-p1').value, p2: $('together-p2').value,
                          difficulty: +$('together-difficulty').value, teleport: +$('together-teleport').checked, pickups: +$('together-pickups').checked };
-      if (!ttPass.held) { err.textContent = 'Import your disc first: then you can make a game.'; return; }
-      $('together-create').disabled = true;
+      if (!ttPass.held) { err.textContent = 'Import your disc first: then you can make a game.'; return false; }
       try {
         for (let tries = 0; tries < 5; tries++) {
           const c = newCode();
@@ -96,17 +123,13 @@
           if (r.status === 409) continue;
           if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `the server said ${r.status}`);
           remember(c, settings, 'host');
-          location.search = `?match=${encodeURIComponent(c)}`;
-          return;
+          go(c);
+          return true;
         }
         throw new Error('no free code: try again');
-      } catch (e) { err.textContent = `Could not make the game: ${e.message}`; $('together-create').disabled = false; }
+      } catch (e) { err.textContent = `Could not make the game: ${e.message}`; return false; }
     };
-    $('together-join').onsubmit = (e) => {
-      e.preventDefault();
-      const c = $('together-code').value.trim().toLowerCase().replace(/^.*[?&]match=/, '').replace(/[^a-z0-9_-]/g, '');
-      if (c) location.search = `?match=${encodeURIComponent(c)}`;
-    };
+    $('together-join').onsubmit = (e) => { e.preventDefault(); const c = joinCode(); if (c) go(c); };
     const games = store.get('tt-games', []).filter((g) => Date.now() - g.at < 7 * 86400000);
     $('together-recent').hidden = !games.length;
     const list = $('together-recent-list'); list.innerHTML = '';
@@ -275,6 +298,7 @@
   })();
 
   const ready = (code ? game() : Promise.resolve(lobby())).then(() => true, () => false);
+  showMode();
   ready.then((ok) => { if (!ok || !settingsKnown) gateOpen(); else offerKeep(); });   // (no shared game: nothing to wait for)
   savesRow();
   self.ttLobby = { ready, gate };

@@ -44,6 +44,8 @@
 
   async function startGame() {
     const what = $('setup-what');
+    // (Play together, outside a game: lobby.js makes or joins one, and the page goes to its address)
+    if (self.ttPlayChoice && await self.ttPlayChoice()) return;
     if (self.ttLobby && !(await self.ttLobby.ready)) return;   // (a shared game's link that leads nowhere)
     if (self.ttLobby) {   // a shared game's guest: the host's saves first (lobby.js)
       what.textContent = 'Getting the game ready (the host’s saves)…';
@@ -85,7 +87,10 @@
     $('setup-play').disabled = !disc || self.ttLobbyBlocked;
     $('step-disc').classList.toggle('done', disc);
     $('step-ultra').classList.toggle('done', ultra);
-    $('setup-play-note').textContent = disc ? (ultra ? 'Your disc and the Ultra textures are ready.' : 'Your disc is ready.') : 'Import your disc first.';
+    const ready = disc ? (ultra ? 'Your disc and the Ultra textures are ready.' : 'Your disc is ready.') : 'Import your disc first.';
+    const together = self.ttPlayMode?.() === 'together' && !q.get('match');
+    $('setup-play-note').textContent = disc && together
+      ? `${ready} Enter Middle-earth ${$('together-code').value.trim() ? 'joins that game' : 'makes the game and gives you a link for your friend'}.` : ready;
     if (navigator.storage.estimate) {
       const { usage, quota } = await navigator.storage.estimate();
       $('setup-space').textContent = `This site's storage: ${(usage / 1e9).toFixed(1)} GB used of ${(quota / 1e9).toFixed(0)} GB allowed.`;
@@ -149,6 +154,8 @@
   };
   $('setup-build').onclick = () => { location.search = '?TT_WEB_ULTRA_BUILD=/local/ultra'; };
   $('setup-play').onclick = startGame;
+  addEventListener('tt-mode', () => refresh());
+  $('together-code').addEventListener('input', () => refresh());
   $('setup-forget').onclick = () => guard(async () => {
     if (!confirm('Remove the imported disc and textures from this browser? (Saves and settings stay.)')) return;
     const root = await navigator.storage.getDirectory();

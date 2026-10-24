@@ -123,6 +123,17 @@
   .btn:hover { background: rgba(231,199,122,.16); border-color: var(--gold); }
   .btn:focus-visible, #setup-play:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 3px; }
   input:disabled + .btn, .btn:disabled { opacity: .45; pointer-events: none; }
+  .mode { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 10px 0 18px; }
+  .mode button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; cursor: pointer;
+                 padding: 16px 18px; border-radius: 12px; color: var(--text); background: rgba(255,255,255,.03);
+                 border: 1px solid rgba(231,199,122,.2); transition: border-color .2s, background .2s, box-shadow .2s; }
+  .mode button b { font: 600 18px/1.2 Cinzel, Georgia, serif; letter-spacing: .04em; color: var(--gold-hi); }
+  .mode button span { font: 13px/1.4 system-ui, sans-serif; color: var(--muted); }
+  .mode button:hover { border-color: rgba(231,199,122,.45); }
+  .mode button[aria-checked="true"] { border-color: var(--gold); background: rgba(231,199,122,.09);
+                                      box-shadow: 0 0 0 3px rgba(231,199,122,.12), inset 0 0 30px rgba(231,199,122,.05); }
+  .mode button:focus-visible { outline: 2px solid var(--gold-hi); outline-offset: 3px; }
+  @media (max-width: 520px) { .mode { grid-template-columns: 1fr; } }
   .play { margin: 34px auto 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
   #setup-play { cursor: pointer; border: 0; border-radius: 999px; padding: 18px 46px; color: var(--ink);
     font: 700 clamp(15px, 2vw, 18px)/1 Cinzel, Georgia, serif; letter-spacing: .22em; text-transform: uppercase;
@@ -243,10 +254,14 @@
           </div>
         </div>
         <div class="card wide" id="step-together">
-          <h3><span class="num">3</span>Play together <span class="opt">optional</span></h3>
+          <h3><span class="num">3</span>How you'll play</h3>
+          <div class="mode" role="radiogroup" aria-label="How you'll play">
+            <button type="button" role="radio" id="mode-solo" aria-checked="true"><b>Play solo</b><span>One player, on this machine</span></button>
+            <button type="button" role="radio" id="mode-together" aria-checked="false"><b>Play together</b><span>Online co-op with a friend</span></button>
+          </div>
           <div id="together-new" hidden>
-            <p>Two players, each with their own disc, on two machines. Make a game and send your friend the link,
-               or join theirs. Skip this to play alone.</p>
+            <p>Two players on two machines. Pick how the game starts and press Enter Middle-earth: you get a link to
+               send your friend. Or paste theirs below to join.</p>
             <div class="together">
               <div>
                 <div class="sub">Make a game</div>
@@ -264,7 +279,6 @@
                 <label class="field">Difficulty <select id="together-difficulty"></select></label>
                 <label class="check"><input type="checkbox" id="together-teleport" checked> Player 2 jumps to player 1 when far behind</label>
                 <label class="check"><input type="checkbox" id="together-pickups" checked> Double pickups (each can be taken twice)</label>
-                <button class="btn" id="together-create">Make a game and get its link</button>
                 <p class="quiet" style="margin-top:10px">Tested online so far: every level for four minutes, and through a level's end into the next.</p>
               </div>
               <div>
@@ -339,6 +353,7 @@
       <span id="res-now"></span>
       <select id="res-pick" aria-label="Resolution"><option value="720">720p</option><option value="1080">1080p</option></select>
     </label>
+    <button id="btn-invite" type="button" hidden>Copy invite link</button>
     <button id="btn-keys" type="button" aria-pressed="false" aria-controls="keys">Keys</button>
     <button id="btn-log" type="button" aria-pressed="false" aria-controls="log">Log</button>
     <button id="btn-full" type="button">Fullscreen</button>
@@ -380,6 +395,18 @@
       const q = new URLSearchParams(location.search); q.delete('TT_WEB_LINES'); q.delete('TT_WEB_SIZE');
       location.search = q.toString();
     };
+  }
+  // a co-op game: its link from the bar too (the host goes straight in from the splash)
+  {
+    const m = new URLSearchParams(location.search).get('match'), btn = document.getElementById('btn-invite');
+    if (m) {
+      btn.hidden = false;
+      btn.onclick = async () => {
+        const url = `${location.origin}${location.pathname}?match=${encodeURIComponent(m)}`;
+        try { await navigator.clipboard.writeText(url); btn.textContent = 'Copied ✓'; } catch { prompt('The game\'s link:', url); }
+        setTimeout(() => (btn.textContent = 'Copy invite link'), 2000); canvas.focus();
+      };
+    }
   }
   document.getElementById('btn-full').onclick = () => { document.getElementById('stage').requestFullscreen?.().catch(() => {}); canvas.focus(); };
   let ctx = null;   // (software renderer only: with WebGL the game's render thread owns the canvas)

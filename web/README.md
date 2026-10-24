@@ -50,8 +50,8 @@ apply as on the desktop.
 The same page can be served from Cloudflare, without any game files: on the first visit each player picks their
 own ISO (and, if they want the Ultra textures, the GLOS69 folder unpacked from the pack's download); the page copies
 them into the site's storage in their browser (OPFS: about 4.5 GB for the disc, a few seconds to a minute) and
-builds the Ultra textures there once. Nothing is uploaded. `?setup` opens that screen again (to add the textures,
-or remove the imported files).
+builds the Ultra textures there once. Nothing is uploaded. The splash shows on every visit, to add the textures or remove the
+imported files.
 
 ```sh
 web/build.sh && node web/site.mjs                     # -> web/netplay-server/public/ (the page, the build; never committed)
