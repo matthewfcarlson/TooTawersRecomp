@@ -47,14 +47,14 @@ console.log(`${site}: ${discFiles.length} disc files, ${ultraFiles.length} Ultra
 
 const auth = { Authorization: `Bearer ${secret}` };
 const at = (key, q = '') => `${site}/share-upload/${key.split('/').map(encodeURIComponent).join('/')}${q}`;
-async function call(url, opts, tries = 4) {
+async function call(url, opts, tries = 8) {
   for (let i = 1; ; i++) {
     try {
       const r = await fetch(url, { ...opts, headers: { ...auth, ...opts.headers } });
       if (r.ok || r.status === 404 || i >= tries) return r;
       if (r.status === 403) { console.error('the server refused the upload secret'); process.exit(1); }
     } catch (e) { if (i >= tries) throw e; }
-    await new Promise((res) => setTimeout(res, 2000 * i));
+    await new Promise((res) => setTimeout(res, Math.min(30000, 2000 * i * i)));   // (a dropped connection: longer each time)
   }
 }
 const read = (file, start, end) => {   // (a part of a file, as a Buffer)
@@ -65,6 +65,7 @@ const read = (file, start, end) => {   // (a part of a file, as a Buffer)
 
 const PART = 48 << 20, ONE_PUT = 90 << 20;
 let done = 0, sent = 0, skipped = 0;
+const failed = [];
 async function upload(f) {
   const head = await call(at(f.key), { method: 'HEAD' });
   if (head.ok && Number(head.headers.get('X-Size')) === f.size) { skipped++; return; }
@@ -92,7 +93,14 @@ const queue = [...jobs].sort((a, b) => b.size - a.size);
 let last = 0;
 await Promise.all(Array.from({ length: 4 }, async () => {
   for (let f; (f = queue.shift()); ) {
-    await upload(f);
+    // (a file that still fails after its retries is left for the next run, which skips what is there)
+    for (let k = 1; ; k++) {
+      try { await upload(f); break; }
+      catch (e) {
+        if (k >= 3) { failed.push(f.rel); console.log(`  ${f.rel}: ${e.cause?.code || e.message} -- left for the next run`); break; }
+        await new Promise((res) => setTimeout(res, 10000 * k));
+      }
+    }
     done++;
     if (Date.now() - last > 5000 || !queue.length) {
       last = Date.now();
@@ -101,6 +109,10 @@ await Promise.all(Array.from({ length: 4 }, async () => {
   }
 }));
 
+if (failed.length) {   // (no manifests yet: the game would list files that are not there)
+  console.log(`${failed.length} file(s) not uploaded; run again to finish: ${failed.slice(0, 5).join(', ')}${failed.length > 5 ? ', ...' : ''}`);
+  process.exit(1);
+}
 // the manifests last: the game lists only what is there
 const manifest = (files) => files.map((f) => `${f.size} ${f.rel}`).join('\n') + '\n';
 for (const [key, files] of [['disc-manifest.json', discFiles], ['ultra-manifest.json', ultraFiles]]) {
