@@ -30,7 +30,11 @@
   #bar button { font: 600 12px/1 system-ui, sans-serif; color: #e9e3d4; background: rgba(255,255,255,.06); cursor: pointer;
                 border: 1px solid rgba(231,199,122,.28); border-radius: 999px; padding: 7px 12px; }
   #bar button:hover, #bar button[aria-pressed="true"] { background: rgba(231,199,122,.14); border-color: rgba(231,199,122,.6); }
-  #bar button:focus-visible { outline: 2px solid #e7c77a; outline-offset: 2px; }
+  #bar button:focus-visible, #bar select:focus-visible { outline: 2px solid #e7c77a; outline-offset: 2px; }
+  #bar .res { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #bar select { font: 600 12px/1 system-ui, sans-serif; color: #e9e3d4; background: rgba(255,255,255,.06); cursor: pointer;
+                border: 1px solid rgba(231,199,122,.28); border-radius: 999px; padding: 6px 10px; }
+  #bar select option { background: #11131b; }
   #game { --ar: 1.7778; --stage-w: min(100%, calc((100dvh - 76px) * var(--ar))); }
   #stage { width: var(--stage-w); margin: 0 auto; border-radius: 7px; background: #000;
            box-shadow: 0 0 0 1px rgba(231,199,122,.32), 0 0 0 5px rgba(7,8,12,.9), 0 0 0 6px rgba(231,199,122,.12),
@@ -38,6 +42,21 @@
   #stage:fullscreen { width: 100vw; height: 100vh; display: flex; align-items: center; justify-content: center; border-radius: 0; box-shadow: none; }
   #stage:fullscreen #screen { width: min(100vw, calc(100vh * var(--ar))); border-radius: 0; }
   #panel { width: var(--stage-w); margin: 14px auto 0; box-sizing: border-box; }
+  /* the loading bar, over the picture: the game starting, and files streamed from the site (fetch_fix.js) */
+  #stage { position: relative; }
+  #loading { position: absolute; left: 0; right: 0; bottom: 0; padding: 28px 22px 18px; pointer-events: none;
+             background: linear-gradient(180deg, transparent, rgba(7,8,12,.82) 55%); border-radius: 0 0 6px 6px;
+             transition: opacity .35s ease; opacity: 1; }
+  #loading.off { opacity: 0; }
+  #loading .lt { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 9px; font-size: 13px; color: #e9e3d4; }
+  #loading .lt b { font-family: Cinzel, serif; font-weight: 600; letter-spacing: .06em; color: #f0d999; }
+  #loading .lt span { color: #a49d8c; font-variant-numeric: tabular-nums; }
+  #loading .bar { height: 4px; border-radius: 4px; background: rgba(255,255,255,.08); overflow: hidden; position: relative; }
+  #loading .bar i { position: absolute; top: 0; bottom: 0; width: 34%; border-radius: 4px;
+                    background: linear-gradient(90deg, transparent, #e7c77a 40%, #fff3d1 50%, #e7c77a 60%, transparent);
+                    animation: tt-sweep 1.4s ease-in-out infinite; }
+  @keyframes tt-sweep { from { left: -34%; } to { left: 100%; } }
+  @media (prefers-reduced-motion: reduce) { #loading .bar i { animation: none; left: 0; width: 100%; opacity: .6; } }
   #keys { color: #cfc8b8; background: rgba(13,14,19,.8); border: 1px solid rgba(231,199,122,.2); border-radius: 10px; padding: 4px 14px; }
   kbd { background: #2a2a2a; border-radius: 3px; padding: 0 4px; font-size: 12px; }
   /* ---- the splash: your game files, then Play ---- */
@@ -316,11 +335,17 @@
     <span id="status">Loading…</span>
     <span id="netplay"></span>
     <span class="spacer"></span>
+    <label class="res" title="The resolution the game draws at (the game starts again to change it)">
+      <span id="res-now"></span>
+      <select id="res-pick" aria-label="Resolution"><option value="720">720p</option><option value="1080">1080p</option></select>
+    </label>
     <button id="btn-keys" type="button" aria-pressed="false" aria-controls="keys">Keys</button>
     <button id="btn-log" type="button" aria-pressed="false" aria-controls="log">Log</button>
     <button id="btn-full" type="button">Fullscreen</button>
   </div>
-  <div id="stage"><canvas id="screen" width="640" height="480" tabindex="0"></canvas></div>
+  <div id="stage"><canvas id="screen" width="640" height="480" tabindex="0"></canvas>
+    <div id="loading" role="status" aria-live="polite"><div class="lt"><b id="loading-what">Starting the game</b><span id="loading-mb"></span></div><div class="bar"><i></i></div></div>
+  </div>
   <div id="panel">
   <div id="keys" hidden>
     <p>Click the picture first: that also starts the sound.</p>
@@ -346,6 +371,16 @@
   const toggle = (btn, el) => { el.hidden = !el.hidden; btn.setAttribute('aria-pressed', String(!el.hidden)); canvas.focus(); };
   document.getElementById('btn-keys').onclick = (e) => toggle(e.currentTarget, document.getElementById('keys'));
   document.getElementById('btn-log').onclick = (e) => toggle(e.currentTarget, document.getElementById('log'));
+  // the resolution: remembered, then the game starts again at it (import.js: straight back in, no splash)
+  {
+    const pick = document.getElementById('res-pick');
+    pick.onchange = () => {
+      try { localStorage.setItem('tt-lines', pick.value); } catch {}
+      sessionStorage.setItem('tt-restart', '1');
+      const q = new URLSearchParams(location.search); q.delete('TT_WEB_LINES'); q.delete('TT_WEB_SIZE');
+      location.search = q.toString();
+    };
+  }
   document.getElementById('btn-full').onclick = () => { document.getElementById('stage').requestFullscreen?.().catch(() => {}); canvas.focus(); };
   let ctx = null;   // (software renderer only: with WebGL the game's render thread owns the canvas)
   // the game prints a lot (thousands of lines a second while starting):
@@ -384,6 +419,12 @@
   const args = {};
   for (const [k, v] of new URLSearchParams(location.search)) args[k] = v;
   self.ttArgs = args;   // (lobby.js fills in a shared game's settings before the game starts)
+  // the picture's resolution: the bar's 720p / 1080p, remembered in this browser (the address's TT_WEB_LINES or
+  // TT_WEB_SIZE win); 3D is drawn at it too (nv2a_gl.inc)
+  const LINES = ['720', '1080'];
+  const savedLines = (() => { try { return localStorage.getItem('tt-lines'); } catch { return null; } })();
+  if (!args.TT_WEB_SIZE) args.TT_WEB_LINES ??= LINES.includes(savedLines) ? savedLines : '1080';
+  document.getElementById('res-pick').value = LINES.includes(args.TT_WEB_LINES) ? args.TT_WEB_LINES : '1080';
   if (args.TT_WEB_LOGALL) { allLines = []; self.ttLogTake = () => allLines.splice(0); }
   // online co-op (?match=<code>, web/netplay.js): the game takes its inputs in lockstep
   // at a fixed step: both machines must step the game by the same time each frame (NETPLAY.md)
@@ -393,8 +434,41 @@
     delete args.match; delete args.server;
   }
 
+  // The loading bar: until the first frame, "Starting the game"; then while files stream from the site (a level's
+  // load), how much has come and how fast. Shown once a burst of fetching passes 12 MB (the sound streamed in play,
+  // 4 MB at a time, never shows it), gone 600 ms after the last fetch.
+  const loading = (() => {
+    const el = document.getElementById('loading'), what = document.getElementById('loading-what'), mb = document.getElementById('loading-mb');
+    let started = false, done = false, inflight = 0, bytes = 0, burst = null, hideT = 0;
+    const MB = (b) => (b / 1048576).toFixed(b < 10485760 ? 1 : 0) + ' MB';
+    function paint() {
+      if (done) { el.classList.add('off'); return; }
+      if (!started) { what.textContent = 'Starting the game'; mb.textContent = bytes ? MB(bytes) + ' loaded' : ''; return el.classList.remove('off'); }
+      if (!burst) return el.classList.add('off');
+      const got = bytes - burst.bytes, secs = (performance.now() - burst.t) / 1000;
+      what.textContent = 'Loading';
+      mb.textContent = `${MB(got)}${secs > 1 ? ` · ${(got / 1048576 / secs).toFixed(1)} MB/s` : ''}`;
+      el.classList.toggle('off', !burst.shown);
+    }
+    if (typeof BroadcastChannel != 'undefined') new BroadcastChannel('tt-loading').onmessage = (e) => {
+      inflight = e.data.inflight; bytes = e.data.bytes;
+      if (inflight > 0) {
+        clearTimeout(hideT);
+        if (!burst) burst = { t: performance.now(), bytes, shown: false };
+      } else if (burst) {
+        clearTimeout(hideT);
+        hideT = setTimeout(() => { burst = null; paint(); }, 600);
+      }
+      if (burst && !burst.shown && bytes - burst.bytes >= 12 << 20) burst.shown = true;
+      paint();
+    };
+    paint();
+    return { frame() { if (!started) { started = true; paint(); } }, end() { done = true; paint(); } };
+  })();
+
   let frames = 0, t0 = performance.now(), ended = false, ready = false;   // ready: the game's exports can be called
   function countFrames(n) {
+    loading.frame();
     frames += n;
     const now = performance.now();
     if (now - t0 > 2000) {
@@ -413,7 +487,7 @@
       countFrames(1);
     },
     ttFrames: countFrames,   // WebGL: frames presented, reported in batches
-    ttCanvasSize(w, h) { shape(w, h); },   // WebGL: the picture's shape (16:9 by default)
+    ttCanvasSize(w, h) { shape(w, h); document.getElementById('res-now').textContent = `${w}×${h}`; },   // WebGL: the picture's size and shape (16:9 by default)
     ttAudioStart(buf, ptr, frames) {   // the game's sound ring (apu_xaudio2.c)
       audio = { buf, ptr, frames };
       if (gestured) startAudio().catch((err) => log('[WEB] sound could not start: ' + err));   // (a click came first)
@@ -423,8 +497,8 @@
       Module.ttReady = true;
       for (const fn of Module.ttReadyQueue || []) fn();
     },
-    onAbort(what) { ended = true; status('Stopped: ' + what, true); },
-    onExit(code) { ended = true; status(`The game ended (code ${code}). Reload to start again.`, code !== 0); },
+    onAbort(what) { ended = true; loading.end(); status('Stopped: ' + what, true); },
+    onExit(code) { ended = true; loading.end(); status(`The game ended (code ${code}). Reload to start again.`, code !== 0); },
   };
   status('Starting… the first frames take a few seconds.');
 

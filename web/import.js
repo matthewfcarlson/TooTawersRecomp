@@ -175,6 +175,11 @@
     // (the hosted site's own copy, for its password's holders, is a choice on the splash like an imported disc)
     share = await shareState();
     if (!share && await serverHas('disc-manifest.json')) return startGame();
+    // the bar's resolution changed (index.html): back into the game at once
+    if (sessionStorage.getItem('tt-restart') === '1') {
+      sessionStorage.removeItem('tt-restart');
+      if (share?.held || await opfsHas('disc/.complete')) return startGame();
+    }
     // a co-op game restarting after a reload (netplay.js): back into it at once
     if (q.get('match') && sessionStorage.getItem('tt-autostart') === q.get('match') && (share?.held || await opfsHas('disc/.complete'))) {
       sessionStorage.removeItem('tt-autostart');

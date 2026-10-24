@@ -15,6 +15,9 @@
 // (the hosted site's disc and Ultra textures, 11 GB), the tab's memory only
 // grew. Now they are kept up to CACHE_CAP bytes, the least recently read
 // dropped first (and fetched again if read again); a read's own never.
+//
+// FIX 3: what is being fetched, told to the page (a BroadcastChannel,
+// "tt-loading": {inflight, bytes}) for its loading bar.
 addToLibrary({
   $wasmFS$fetchCache: { cap: 768 * 1024 * 1024, bytes: 0, lru: new Map() },   // key "file:chunk" -> bytes, oldest first
   _wasmfs_create_fetch_backend_js__deps: [
@@ -26,6 +29,23 @@ addToLibrary({
   ],
   _wasmfs_create_fetch_backend_js: async function(backend) {
     var cache = wasmFS$fetchCache;
+    // (FIX 3) fetches in flight and bytes so far, for the page's loading bar (at most every 150 ms, and when idle)
+    var act = { inflight: 0, bytes: 0, last: 0 };
+    var chan = typeof BroadcastChannel != 'undefined' ? new BroadcastChannel('tt-loading') : null;
+    function report() {
+      var t = Date.now();
+      if (chan && (act.inflight === 0 || t - act.last > 150)) { act.last = t; chan.postMessage({ inflight: act.inflight, bytes: act.bytes }); }
+    }
+    async function get(url, opts) {
+      act.inflight++; report();
+      try {
+        var r = await fetch(url, opts);
+        if (!r.ok) throw r;
+        var b = new Uint8Array(await r.arrayBuffer());
+        act.bytes += b.byteLength;
+        return b;
+      } finally { act.inflight--; report(); }
+    }
     function keep(file, i, n) {   // (FIX 2) chunk i of file used now: newest
       var k = file + ':' + i;
       if (cache.lru.has(k)) cache.lru.delete(k); else cache.bytes += n;
@@ -65,9 +85,7 @@ addToLibrary({
           wasmFS$JSMemoryRanges[file] = {size, chunks: [], chunkSize};
           len = Math.min(len, size - offset);
         } else {
-          var wholeFileReq = await fetch(url);
-          if (!wholeFileReq.ok) throw wholeFileReq;
-          var wholeFileData = new Uint8Array(await wholeFileReq.arrayBuffer());
+          var wholeFileData = await get(url);
           wasmFS$JSMemoryRanges[file] = {size: wholeFileData.byteLength, chunks: [wholeFileData], chunkSize: wholeFileData.byteLength};
           keep(file, 0, wholeFileData.byteLength); trim(file, 0, 0);
           return;
@@ -85,9 +103,7 @@ addToLibrary({
       if (allPresent) { for (i = firstChunk; i <= lastChunk; i++) keep(file, i, wasmFS$JSMemoryRanges[file].chunks[i].byteLength); return; }
       var start = firstChunk * chunkSize;
       var end = (lastChunk + 1) * chunkSize;
-      var response = await fetch(url, {headers: {'Range': `bytes=${start}-${end - 1}`}});
-      if (!response.ok) throw response;
-      var bytes = new Uint8Array(await response.arrayBuffer());
+      var bytes = await get(url, {headers: {'Range': `bytes=${start}-${end - 1}`}});
       for (i = firstChunk; i <= lastChunk; i++) {
         wasmFS$JSMemoryRanges[file].chunks[i] = bytes.slice(i * chunkSize - start, (i + 1) * chunkSize - start);
         keep(file, i, wasmFS$JSMemoryRanges[file].chunks[i].byteLength);

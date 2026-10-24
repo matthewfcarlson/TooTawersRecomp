@@ -405,11 +405,11 @@ static int s_web_lines;   /* (the canvas's height: the default render scale, its
 static void *web_gl_context(void)
 {
     EmscriptenWebGLContextAttributes a;
-    /* the canvas in pixels: TT_WEB_SIZE (e.g. 1920x1080), else 960 lines at the picture's shape
-     * (RECOMP_ASPECT, from the ini's aspect: 1707x960 at 16:9, 1280x960 at 4:3) */
-    const char *sz = getenv("TT_WEB_SIZE"), *as = getenv("RECOMP_ASPECT");
-    int w = 1280, h = 960;
-    if (as && atof(as) > 1.0 && atof(as) < 6.0) w = (int)(960.0 * atof(as) + 0.5) & ~1;
+    /* the canvas in pixels: TT_WEB_SIZE (e.g. 1920x1080), else TT_WEB_LINES (the page's 720p / 1080p; default
+     * 960) lines at the picture's shape (RECOMP_ASPECT, from the ini's aspect: 1707x960 at 16:9, 1280x960 at 4:3) */
+    const char *sz = getenv("TT_WEB_SIZE"), *as = getenv("RECOMP_ASPECT"), *ln = getenv("TT_WEB_LINES");
+    int h = ln && atoi(ln) >= 480 && atoi(ln) <= 2160 ? atoi(ln) : 960, w = h * 4 / 3;
+    if (as && atof(as) > 1.0 && atof(as) < 6.0) w = (int)(h * atof(as) + 0.5) & ~1;
     if (sz) sscanf(sz, "%dx%d", &w, &h);
     emscripten_webgl_init_context_attributes(&a);
     a.majorVersion = 2; a.minorVersion = 0;
