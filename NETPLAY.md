@@ -131,15 +131,29 @@ and saves"), with a fingerprint check before the guest starts.
 Legolas, the host's pad walking and fighting: no desync in nine of the ten levels of the lobby's list; the Hornburg
 Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Offline the same level is
 deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
-frames compared, to frame 4,860), so what parts it is online only. Online it parts every time, in the same order
-(state hashes from both players, `netplay-check.mjs --pull`; the pages that differ dumped with
-`TT_STATEHASH_DUMPPAGES`): from about frame 1,100 one word, 0x818E01E8, differs -- a counter rising about 200 a
-second on both machines, one a constant 146 ahead of the other: the sound chip's progress (187.5 periods a second of
-real time, the APU's clock) as the game sees it; by frame 2,300 it is copied on (0x8255C234) and the game's own
-variables (pages 0x1C0000, 0x420000) differ; the positions by 2,550. So the courtyard waits on a sound (most likely
-a voice line ending) and the sound chip keeps real time on each machine. The fix: the APU in step with the game's
-frames online (each frame's 50 periods made at the frame's boundary, its interrupts handled there), the output
-buffering the bursts.
+frames compared, to frame 4,860), so what parts it is online only.
+
+**The courtyard's desync: the game's timer read at real time (fixed 2026-10-24).** First blamed on the sound chip
+(a word that drifts between the machines, 0x818E01E8): wrong. That word is a D3D vertex buffer's `Lock` field,
+stamped with D3D's push-buffer time (device+0x30, +2 a fence), whose count follows each machine's GPU timing; it
+drifts harmlessly (a relayed run 298 apart stayed in step). The cause: the game's timer update (sub_000E3540) turns
+the performance counter into the frame's real time (s 0x4B8BC0, ms 0x4B8BB8) and a running sum (0x4B8BBC,
+0x4B8BB4), and sub_000E3350 makes from them everything the game reads (the step and sum as play sees them,
+0x4B8B94-0x4B8BA0: zero while paused, times the script's time scale 0x1C3590 while 0x4B8B8C is set; unpaused
+copies, 0x4B8BA4-0x4B8BB0). The fixed step overwrote those outputs and left the four sources real -- and game code
+reads the real seconds directly while time is paused or scaled (the player's update sub_00098130, effects at
+0x000E4E80 / 0x000E56C0 / 0x000E8B70). The courtyard's script keeps the time scale on all level long, so each
+machine's frame-time jitter (worst while one waits for the other) moved the game by ~1e-5 until positions parted.
+Now the four sources get the fixed step and a sum of steps, and the game's own sub_000E3350 runs again on them
+(`tt_frametime`, twotowers_manual.c): slow motion plays slowly online too (it was flattened to the plain step), and
+the sums are sums (the old overwrite put the step in them). Between frames the seconds' sum holds a mark (1e9), so
+the game zeroing it (sub_000E3240 / sub_000E32A0) is seen without looking at real time. A tick outside the session's
+frames (a load's wait, a tutorial hint's pause: 0x0007C234, which counts real seconds until it may go on) keeps the
+real seconds there and a step of 0. `TT_NETPLAY_REALSRC=1`: the old way. Checked: one machine, the courtyard twice
+from one pad script, one run stalled 3 s at frame 2,200 -- before, parted at frame 3,600 every time (4 of 4); now
+actor positions identical to frame ~6,600 (twice); online through the relay five minutes, no desync; the level end,
+results, shops, save, map, next level and its end in lockstep online, each screen change on the same frame as
+before. The sound chip still runs on real time; it decided nothing here.
 
 **The menus in lockstep (2026-10-24, `TT_NETPLAY_MENUS=1`, set by the lobby):** a level's end, its results and
 shops, the save, the mission map and the next level, played on both machines as one. From the first frame of play

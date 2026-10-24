@@ -729,16 +729,61 @@ static void tt_frametime(void)
             extern float tt_netplay_step(float fixed);
             float fake_ms = kind ? tt_netplay_step(fake) : 0.0f;   /* (outside play, with the menus in lockstep: half) */
             float fs = fake_ms * 0.001f; uint32_t w;
-            memcpy(&w, &fake_ms, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
-            memcpy(&w, &fs, 4); if (MEM32(0x4B8BA0u)) MEM32(0x4B8BA0u) = w;
-            {   /* (netplay) the rest of the timer too: the raw step (ms at
-                 * 0x4B8B94, s at 0x4B8B9C) and the unpaused copies
-                 * (0x4B8BA4-0x4B8BB0), which game code reads as well -- left
-                 * at real time, two runs at a fixed step parted in combat */
-                static const uint32_t ms_at[3] = { 0x4B8B94u, 0x4B8BA4u, 0x4B8BA8u }, s_at[3] = { 0x4B8B9Cu, 0x4B8BACu, 0x4B8BB0u };
-                int i;
-                memcpy(&w, &fake_ms, 4); for (i = 0; i < 3; i++) if (MEM32(ms_at[i])) MEM32(ms_at[i]) = w;
-                memcpy(&w, &fs, 4); for (i = 0; i < 3; i++) if (MEM32(s_at[i])) MEM32(s_at[i]) = w;
+            static int realsrc = -1;
+            if (realsrc < 0) realsrc = getenv("TT_NETPLAY_REALSRC") != NULL;
+            if (!realsrc) {
+                /* (netplay) The step goes in where the game's timer starts: its update (sub_000E3540)
+                 * turns the performance counter into the frame's real time (s at 0x4B8BC0, ms at
+                 * 0x4B8BB8) and adds it to a running sum (s at 0x4B8BBC, ms at 0x4B8BB4), then this
+                 * function (sub_000E3350) makes everything game code reads from those four: the
+                 * step and sum as play sees them (0x4B8B94-0x4B8BA0: zero while paused, 0x4B8B84;
+                 * times the script's time scale 0x1C3590 while 0x4B8B8C is set; the game's own
+                 * fixed step under 0x4B8B80) and unpaused copies (0x4B8BA4-0x4B8BB0). So the four
+                 * get the fixed step and a sum of fixed steps, and the game's function runs again
+                 * on them: every value it hands out is the same on both machines, slow motion and
+                 * pauses included. Game code also reads the real seconds directly while time is
+                 * paused or scaled (the player's update sub_00098130, the timer at 0x0007C234, the
+                 * effects at 0x000E4E80 / 0x000E56C0 / 0x000E8B70): left at real time, the two
+                 * machines' frame-time jitter parted the Hornburg Courtyard (20YARD1), whose script
+                 * runs the time scale all level long. TT_NETPLAY_REALSRC=1: the old way (the
+                 * outputs overwritten with the step, the sources left real).
+                 *
+                 * The sum: between frames the seconds' sum holds SUM_MARK. The update only ever adds
+                 * the real step to it, or the game zeroes it (sub_000E3240, sub_000E32A0: a new
+                 * level, a reset of time) -- so a value far under the mark says the game started
+                 * the sum again, without looking at how long the frame really took.
+                 *
+                 * A tick outside the session's frames (kind 0: a level load's wait, a tutorial
+                 * hint's pause -- 0x0007C234, which counts the real seconds at 0x4B8BC0 until it
+                 * may go on) gets a step of 0 and the sum unchanged, but the real time is put back
+                 * where that wait reads it: such ticks are as many as each machine takes, and
+                 * change nothing else. */
+                static const float SUM_MARK = 1.0e9f;
+                static double sum_s;
+                float rs, sums, summs;
+                uint32_t real_s = MEM32(0x4B8BC0u), real_ms = MEM32(0x4B8BB8u);
+                { uint32_t r0 = MEM32(0x4B8BBCu); memcpy(&rs, &r0, 4); }
+                if (rs < SUM_MARK * 0.5f) sum_s = 0.0;
+                sum_s += (double)fs;
+                sums = (float)sum_s; summs = sums * 1000.0f;
+                memcpy(&w, &fs, 4); MEM32(0x4B8BC0u) = w;
+                memcpy(&w, &fake_ms, 4); MEM32(0x4B8BB8u) = w;
+                memcpy(&w, &sums, 4); MEM32(0x4B8BBCu) = w;
+                memcpy(&w, &summs, 4); MEM32(0x4B8BB4u) = w;
+                esp -= 4;   /* (its ret popped the return address: the slot again, still holding it) */
+                sub_000E3350_gen();
+                if (!kind) { MEM32(0x4B8BC0u) = real_s; MEM32(0x4B8BB8u) = real_ms; }
+                memcpy(&w, &SUM_MARK, 4); MEM32(0x4B8BBCu) = w;
+            } else {
+                memcpy(&w, &fake_ms, 4); if (MEM32(0x4B8B98u)) MEM32(0x4B8B98u) = w;
+                memcpy(&w, &fs, 4); if (MEM32(0x4B8BA0u)) MEM32(0x4B8BA0u) = w;
+                {   /* (netplay, before) the rest of the timer too: the sums (ms at 0x4B8B94, s at
+                     * 0x4B8B9C) and the unpaused copies (0x4B8BA4-0x4B8BB0) */
+                    static const uint32_t ms_at[3] = { 0x4B8B94u, 0x4B8BA4u, 0x4B8BA8u }, s_at[3] = { 0x4B8B9Cu, 0x4B8BACu, 0x4B8BB0u };
+                    int i;
+                    memcpy(&w, &fake_ms, 4); for (i = 0; i < 3; i++) if (MEM32(ms_at[i])) MEM32(ms_at[i]) = w;
+                    memcpy(&w, &fs, 4); for (i = 0; i < 3; i++) if (MEM32(s_at[i])) MEM32(s_at[i]) = w;
+                }
             }
         }
     }
