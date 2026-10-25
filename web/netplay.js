@@ -23,6 +23,12 @@
 // back to a game under way here (past its first second), this page reloads
 // too and both start the level again together (sessionStorage tt-autostart:
 // straight into the game). A game still at its start just waits for them.
+//
+// A desync (the two games' hashes differ) cannot be mended in place: both
+// pages see it, say so, and start the level again together, the same way --
+// at most twice in 10 minutes (sessionStorage tt-desyncs), then they only say
+// so. An address with the game's own switches (TT_..., the test tools) only
+// reports it, as before.
 (function () {
   const q = new URLSearchParams(location.search);
   const code = q.get('match');
@@ -55,6 +61,19 @@
     setTimeout(() => location.reload(), 1500);
   }
 
+  function recover(frame) {
+    if ([...q.keys()].some((k) => /^TT_/.test(k))) return;   // (a test: report only)
+    let recent = [];
+    try { recent = JSON.parse(sessionStorage.getItem('tt-desyncs') || '[]').filter((t) => Date.now() - t < 600000); } catch {}
+    if (recent.length >= 2) {
+      state.path = 'the two games went out of step again: reload to start the level again'; show();
+      return;
+    }
+    try { sessionStorage.setItem('tt-desyncs', JSON.stringify(recent.concat(Date.now()))); sessionStorage.setItem('tt-autostart', code); } catch {}
+    state.path = `the two games went out of step (frame ${frame}): starting the level again for both of you`; show(); log(state.path);
+    setTimeout(() => location.reload(), 3000);
+  }
+
   function ready(fn) {
     if (Module.ttReady) return fn();
     (Module.ttReadyQueue ??= []).push(fn);
@@ -72,7 +91,7 @@
     sendInputs();
   };
   Module.ttNetHash = (frame, hi, lo, inputs) => {
-    // the simulation's hash, then the hash of every input given so far
+    // the simulation's hash (every actor's whole object: tt_statehash.c), then the hash of every input given so far
     const h = hi.toString(16).padStart(8, '0') + lo.toString(16).padStart(8, '0') + '/' + inputs.toString(16).padStart(8, '0');
     myHashes.set(frame, h);
     compare(frame);
@@ -81,11 +100,13 @@
   function compare(frame) {
     const a = myHashes.get(frame), b = theirHashes.get(frame);
     if (!a || !b) return;
-    if (a !== b && !state.desync) {
+    const [sa, ia] = a.split('/'), [sb, ib] = b.split('/');
+    if ((sa !== sb || ia !== ib) && !state.desync) {
       state.desync = frame;
-      const what = a.split('/')[1] !== b.split('/')[1] ? 'the inputs differ' : 'same inputs, the game differs';
+      const what = ia !== ib ? 'the inputs differ' : 'same inputs, the game differs';
       log(`DESYNC at frame ${frame} (${what}): ${a} here, ${b} there`);
       show();
+      recover(frame);
     }
     myHashes.delete(frame); theirHashes.delete(frame);
   }

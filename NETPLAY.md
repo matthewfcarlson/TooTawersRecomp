@@ -37,8 +37,9 @@ Results (Node, the same build twice, side by side, Weathertop, same script):
 
 - **Memory is not a usable hash as is.** The two runs' RAM differs from the first frame in ~130–270 of 2,048
   pages: GPU command and vertex buffers (most of the contiguous window), audio buffers, stacks, timers and
-  counters. A desync check must hash the simulation's state, not all of memory: for now the actors' and the
-  player's positions (`tt_statehash.c`), to be widened as the game's state is mapped.
+  counters. A desync check must hash the simulation's state, not all of memory: now every actor's whole object
+  (its first 2 KB: health, state, motion as well as where it stands) and the player's position (`tt_statehash.c`,
+  `sh_actors_whole`; see "The desync check" below).
 - **Standing still, and the opening cutscene: identical.** With no input, or input during Weathertop's opening
   cutscene (input ignored there), every actor's position matched in every frame, 1,575 frames.
 - **In combat, the runs parted at in-play frame 1,129**, ~4 s into the scripted fighting: actor positions, pages
@@ -132,6 +133,18 @@ Legolas, the host's pad walking and fighting: no desync in nine of the ten level
 Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Offline the same level is
 deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
 frames compared, to frame 4,860), so what parts it is online only.
+
+**The desync check, and after one (2026-10-24):** the hash both pages compare every 30 frames was the actors'
+positions; it is now every actor's whole object, its first 2 KB. Two offline runs of one scripted fight at Helm's
+Deep, one held 2 s, had all of it identical in all 235 actors at frames 300 and 450, while 118 of its words changed
+in play -- so it is the game's state, with nothing per machine in it, and a desync shows as soon as any of it parts,
+not only once someone stands elsewhere. (The game's globals were tried as an early warning too, minus the words that
+differed offline -- the frame profiler's timestamps, the timer's counter: online they differ from the first check,
+the two machines' own facts kept there, so they are left out.) Swept again online through the relay with it, every
+level four minutes. A desync cannot be mended in place: both pages now say so ("the two games went out of step") and
+start the level again together (netplay.js `recover`, the reconnect's way), at most twice in 10 minutes, then they
+only say so; an address with the game's switches (the test tools) only reports it. Checked with a made game whose
+guest hash was spoiled from frame 300: both pages reloaded once and played on in step.
 
 **Pausing (2026-10-24):** the game reads Start, and its pause menu's buttons, from player 1's pad only, so online
 player 2's Start is put on player 1's too, and while the game's time is paused (0x4B8B84: the pause menu, a hint)

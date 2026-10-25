@@ -75,7 +75,8 @@ static uint64_t sh_page(const uint64_t *w)
 
 #define SH_MEM32(va) (*(const volatile uint32_t *)((uintptr_t)(uint32_t)(va) + g_xbox_mem_offset))
 
-/* the actors' and the player's positions, hashed (order: as they lie in memory) */
+/* the actors' and the player's positions, hashed (order: as they lie in memory) -- the per-frame records'
+ * last entry (statehash.py compares them) */
 static uint64_t sh_actors(uint32_t *count)
 {
     const uint32_t *w = (const uint32_t *)((uintptr_t)SH_CONT_LO + g_xbox_mem_offset);
@@ -93,11 +94,32 @@ static uint64_t sh_actors(uint32_t *count)
     return h ^ (h >> 29);
 }
 
+/* (netplay) the desync check's: every actor's whole object, not only where it stands -- its first 2 KB (its
+ * health, state, motion, ...: two runs of one fight at Helm's Deep, one held 2 s, had all of it the same in all 235
+ * actors at frames 300 and 450, while 118 of its words changed in play), and the player's */
+#define SH_ACTOR_SIZE 0x800u
+static uint64_t sh_actors_whole(void)
+{
+    const uint32_t *w = (const uint32_t *)((uintptr_t)SH_CONT_LO + g_xbox_mem_offset);
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    uint32_t i, k, p = SH_MEM32(SH_PLAYER);
+    for (i = 0; i < (SH_CONT_HI - SH_CONT_LO - SH_ACTOR_SIZE) / 4u; i++)
+        if (w[i] == SH_ACTOR_VT) {
+            for (k = 0; k < SH_ACTOR_SIZE / 4u; k += 2) {
+                h = (h ^ w[i + k]) * 0xFF51AFD7ED558CCDull; h = (h << 31) | (h >> 33);
+                h = (h ^ w[i + k + 1]) * 0xC4CEB9FE1A85EC53ull; h = (h << 29) | (h >> 35);
+            }
+            i += SH_ACTOR_SIZE / 4u - 1;   /* (past it: an actor's words are not another's start) */
+        }
+    if (p) for (i = 0; i < 3; i++) h = (h ^ SH_MEM32(p + 0xF0 + 4 * i)) * 0xC4CEB9FE1A85EC53ull;
+    return h ^ (h >> 29);
+}
+
+
 /* (netplay) the simulation's hash now, for the desync check (tt_netplay.c) */
 uint64_t tt_statehash_sim(void)
 {
-    uint32_t n;
-    return sh_actors(&n);
+    return sh_actors_whole();
 }
 
 void tt_statehash_frame(uint32_t game_ms)

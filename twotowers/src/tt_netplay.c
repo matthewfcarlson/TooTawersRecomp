@@ -226,7 +226,7 @@ static void np_net_frame(uint32_t fr)
     }
     if (fr % 30 == 0 && np_in_play()) {   /* the desync check (in play: its hash is the actors', which outside a level are what freed memory holds) */
         extern uint64_t tt_statehash_sim(void);
-        uint64_t h = tt_statehash_sim();
+        uint64_t h = tt_statehash_sim();   /* (every actor's whole object: tt_statehash.c) */
         (void)h;
 #if defined(__EMSCRIPTEN__)
         MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttNetHash) Module.ttNetHash($0, $1 >>> 0, $2 >>> 0, $3 >>> 0); },
