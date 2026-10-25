@@ -153,6 +153,24 @@
     });
   };
   $('setup-build').onclick = () => { location.search = '?TT_WEB_ULTRA_BUILD=/local/ultra'; };
+  // the controller: named once the browser shows it (a button pressed on it), else how to get it seen
+  function padNote() {
+    const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+    const el = $('setup-pad'), text = $('setup-pad-text');
+    el.classList.toggle('on', pads.length > 0);
+    if (pads.length) {
+      const nm = (p) => p.id.replace(/\s*\(.*?\)\s*/g, ' ').replace(/^[0-9a-f]{4}-[0-9a-f]{4}-/i, '').trim() || 'A controller';
+      text.innerHTML = '';
+      const b = document.createElement('b'); b.textContent = nm(pads[0]);
+      text.append(b, pads.length > 1 ? ` and ${pads.length - 1} more: ready.` : ': ready.');
+    } else {
+      text.textContent = 'No controller seen yet. Connect one (Xbox, PlayStation, Switch Pro…) and press any button on it: browsers only show a controller after a press. The keyboard works too.';
+    }
+  }
+  addEventListener('gamepadconnected', padNote);
+  addEventListener('gamepaddisconnected', padNote);
+  padNote();
+  const padPoll = setInterval(() => { if (document.body.classList.contains('playing')) clearInterval(padPoll); else padNote(); }, 1000);
   $('setup-play').onclick = startGame;
   addEventListener('tt-mode', () => refresh());
   $('together-code').addEventListener('input', () => refresh());

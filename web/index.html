@@ -143,6 +143,12 @@
   #setup-play:not(:disabled):hover { transform: translateY(-2px); box-shadow: 0 0 0 1px rgba(255,243,209,.6), 0 14px 54px rgba(231,199,122,.5); }
   #setup-play:disabled { cursor: default; filter: grayscale(.85) brightness(.55); box-shadow: none; }
   #setup-play-note { color: var(--muted); font: 13px/1.4 system-ui, sans-serif; }
+  .pad { display: flex; align-items: center; gap: 9px; max-width: 560px; text-align: left; color: var(--muted); font: 13px/1.45 system-ui, sans-serif;
+         padding: 9px 14px; border-radius: 10px; border: 1px solid rgba(231,199,122,.14); background: rgba(255,255,255,.025); }
+  .pad .pad-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: #6b6658; box-shadow: 0 0 0 3px rgba(107,102,88,.18); }
+  .pad.on { color: var(--text); border-color: rgba(120,200,130,.35); }
+  .pad.on .pad-dot { background: #79c98a; box-shadow: 0 0 0 3px rgba(121,201,138,.2), 0 0 10px rgba(121,201,138,.6); }
+  .pad b { color: var(--gold-hi); font-weight: 600; }
   #setup progress { -webkit-appearance: none; appearance: none; width: min(560px, 100%); height: 6px; margin: 26px auto 0; display: block;
     border: 0; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.08); }
   #setup progress[hidden] { display: none; }
@@ -322,6 +328,7 @@
       <div class="play">
         <button id="setup-play" disabled>Enter Middle-earth</button>
         <div id="setup-play-note"></div>
+        <div id="setup-pad" class="pad" aria-live="polite"><span class="pad-dot"></span><span id="setup-pad-text"></span></div>
       </div>
       <progress id="setup-progress" hidden></progress>
       <div id="setup-what" role="status"></div>
