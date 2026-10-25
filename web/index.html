@@ -31,6 +31,9 @@
                 border: 1px solid rgba(231,199,122,.28); border-radius: 999px; padding: 7px 12px; }
   #bar button:hover, #bar button[aria-pressed="true"] { background: rgba(231,199,122,.14); border-color: rgba(231,199,122,.6); }
   #bar button:focus-visible, #bar select:focus-visible { outline: 2px solid #e7c77a; outline-offset: 2px; }
+  #bar .vol { display: inline-flex; align-items: center; gap: 6px; }
+  #bar .vol button { padding: 5px 8px; font-size: 13px; line-height: 1; }
+  #bar .vol input { width: 96px; accent-color: #e7c77a; cursor: pointer; }
   #bar .res { display: inline-flex; align-items: center; gap: 8px; color: var(--dim); font-variant-numeric: tabular-nums; }
   #bar select { font: 600 12px/1 system-ui, sans-serif; color: #e9e3d4; background: rgba(255,255,255,.06); cursor: pointer;
                 border: 1px solid rgba(231,199,122,.28); border-radius: 999px; padding: 6px 10px; }
@@ -356,6 +359,10 @@
     <span id="status">Loading…</span>
     <span id="netplay"></span>
     <span class="spacer"></span>
+    <label class="vol" title="Volume (click the speaker to mute)">
+      <button type="button" id="vol-mute" aria-label="Mute">🔊</button>
+      <input type="range" id="vol" min="0" max="100" step="1" value="100" aria-label="Volume">
+    </label>
     <label class="res" title="The resolution the game draws at (the game starts again to change it)">
       <span id="res-now"></span>
       <select id="res-pick" aria-label="Resolution"><option value="720">720p</option><option value="1080">1080p</option></select>
@@ -587,9 +594,29 @@
     await audioCtx.audioWorklet.addModule(url);
     const node = new AudioWorkletNode(audioCtx, 'tt-audio', { numberOfInputs: 0, outputChannelCount: [2] });
     node.port.postMessage({ buf: audio.buf, ptr: audio.ptr, frames: audio.frames });
-    node.connect(audioCtx.destination);
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = volumeGain();
+    node.connect(masterGain).connect(audioCtx.destination);
     await audioCtx.resume();
   }
+  // the bar's volume: the game's whole mix (a gain after the sound worklet), remembered in this browser; the
+  // slider's 0-100 squared, so its middle sounds like half
+  let masterGain = null;
+  const volEl = document.getElementById('vol'), muteEl = document.getElementById('vol-mute');
+  let volume = 100, muted = false;
+  try { const v = JSON.parse(localStorage.getItem('tt-volume') || 'null'); if (v) { volume = Math.max(0, Math.min(100, +v.volume || 0)); muted = !!v.muted; } } catch {}
+  const volumeGain = () => (muted ? 0 : (volume / 100) ** 2);
+  function showVolume() {
+    volEl.value = String(volume);
+    muteEl.textContent = muted || volume === 0 ? '🔇' : volume < 50 ? '🔉' : '🔊';
+    muteEl.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+    if (masterGain) masterGain.gain.setTargetAtTime(volumeGain(), audioCtx.currentTime, 0.02);
+    try { localStorage.setItem('tt-volume', JSON.stringify({ volume, muted })); } catch {}
+  }
+  volEl.addEventListener('input', () => { volume = +volEl.value; muted = false; showVolume(); });
+  volEl.addEventListener('change', () => canvas.focus());   // (the arrow keys back to the game)
+  muteEl.onclick = () => { muted = !muted; showVolume(); canvas.focus(); };
+  showVolume();
 
   // Controllers: the Gamepad API exists only on this thread, so the pads are
   // read here every animation frame and handed to the game in XInput's terms
