@@ -235,11 +235,19 @@ static void np_net_frame(uint32_t fr)
     }
 }
 
+static int s_tick_kind;   /* (tt_netplay_tick, below: 1 a frame, else a load's tick) */
 static int np_latch(tt_np_dword port, TTPadState *state)
 {
     if (!s_frame) return xbox_InputGetStateLocal(port, state) == 0;   /* not in play: the pads as they are */
     if (port >= NP_PORTS || (port == 1 && !s_port1)) return 0;
     *state = s_latched[port];
+    /* (netplay) a load's wait -- its ticks are as many as each machine takes (tt_netplay_tick) -- gets a controller at
+     * rest: the game reads its pads there too, and with the last frame's input read a different number of times on
+     * each machine its controller state came out of the load different (player 1's stick and its derived values,
+     * 0x43B170-0x43B18C, 0 on one machine and 0.22... on the other at the next level's frame 30: a desync 300
+     * frames later). At rest, read however often, it settles the same on both. (Every tick that is not a frame:
+     * a load's, uncounted or of no time, tt_netplay_tick) */
+    if (s_net && s_tick_kind != 1) memset(&state->Gamepad, 0, sizeof state->Gamepad);
     return 1;
 }
 

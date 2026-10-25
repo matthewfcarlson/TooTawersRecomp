@@ -1404,7 +1404,16 @@ DWORD xbox_InputGetStateLocal(DWORD dwPort, XBOX_INPUT_STATE *pState);
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     int (*latch)(DWORD, XBOX_INPUT_STATE *) = xbox_input_latch;
-    if (latch && pState) return latch(dwPort, pState) ? ERROR_SUCCESS : ERROR_DEVICE_NOT_CONNECTED;
+    if (latch && pState) {
+        if (!latch(dwPort, pState)) return ERROR_DEVICE_NOT_CONNECTED;
+        /* (web port, netplay) the title's changes and watchers on the frame's input itself, as the game reads it:
+         * on every machine alike. Run on the local read instead (as offline), a press on one machine did what the
+         * title makes of it -- the main menu's Co-op chosen, the Co-op menu opened -- on that machine only, three
+         * frames early, and the two games parted */
+        if (xbox_pad_filter) xbox_pad_filter(dwPort, pState);
+        if (xbox_pad_observer) xbox_pad_observer(dwPort, pState);
+        return ERROR_SUCCESS;
+    }
     return xbox_InputGetStateLocal(dwPort, pState);
 }
 DWORD xbox_InputGetStateLocal(DWORD dwPort, XBOX_INPUT_STATE *pState)
@@ -1429,10 +1438,11 @@ DWORD xbox_InputGetStateLocal(DWORD dwPort, XBOX_INPUT_STATE *pState)
             fflush(stderr);
         }
     }
-    /* a title's changes (its mouse pointer in the menus: the presses it stands for) */
-    if (r == ERROR_SUCCESS && xbox_pad_filter && game_in_front()) xbox_pad_filter(dwPort, pState);
+    /* a title's changes (its mouse pointer in the menus: the presses it stands for) -- (netplay: with a latch, on
+     * its states, xbox_InputGetState) */
+    if (r == ERROR_SUCCESS && xbox_pad_filter && game_in_front() && !xbox_input_latch) xbox_pad_filter(dwPort, pState);
     /* what the game is about to see (title mods watch the buttons) */
-    if (r == ERROR_SUCCESS && xbox_pad_observer) xbox_pad_observer(dwPort, pState);
+    if (r == ERROR_SUCCESS && xbox_pad_observer && !xbox_input_latch) xbox_pad_observer(dwPort, pState);
     return r;
 }
 
