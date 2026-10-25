@@ -101,6 +101,7 @@ set(GAME_SOURCES
     src/tt_statehash.c
     src/tt_netplay.c
     src/tt_heap.c          # (web port) the game heap's size
+    src/tt_d3dlock.c       # (web port) one game thread in D3D at a time
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c

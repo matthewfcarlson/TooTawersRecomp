@@ -6,6 +6,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 # DirectSound's pointer accesses to the APU (generate.py runs it; here for code generated before it existed)
 python3 "$here/twotowers/postproc_apu_ptr.py" "$here/twotowers/src/recomp/gen" | grep -v "^recomp_" || true
 python3 "$here/twotowers/postproc_heap.py" "$here/twotowers/src/recomp/gen"   # (the game heap's size: likewise)
+python3 "$here/twotowers/postproc_d3dlock.py" "$here/twotowers/src/recomp/gen"   # (one thread in D3D at a time: likewise)
 if [ ! -f "$here/build-web/build.ninja" ]; then
     flags="-sMEMORY64=1 -pthread -msimd128 -msse4.1"
     emcmake cmake -S "$here/twotowers" -B "$here/build-web" -G Ninja -DCMAKE_BUILD_TYPE=Release \
