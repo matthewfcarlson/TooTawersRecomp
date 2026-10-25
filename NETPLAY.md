@@ -134,6 +134,20 @@ Courtyard (20YARD1) parted at frame 2,340 ("same inputs, the game differs"). Off
 deterministic (one scripted fight twice, one run stalled 2.5 s at frame 900: actor positions identical in all 162
 frames compared, to frame 4,860), so what parts it is online only.
 
+**The GPU freeze at a new screen, again (2026-10-24):** 46 two-player level-end runs (Weathertop, the Gates, Balin's
+Tomb; about 7 screen changes each) had no freeze, against 2 in about 15 before; the loop mitigation never fired in
+them, so what made the old freezes rarer is elsewhere (likely the timer's fixed step). The corruption behind them
+still shows under timing stress (the GPU's semaphore writes held 100 ms): the game's loading-screen thread (entry
+0x000E7AE0, raised above the main thread by 0x000E7340 when a loading screen starts, dropped to idle by 0x000E7940
+when it ends) and the main thread both write D3D's push buffer at a hand-off -- PUT published inside a method's
+arguments, a vertex-format block's header overwritten by the other thread's semaphore release, both threads kicking
+within the same millisecond. On the Xbox's one CPU the priorities kept them apart; here they run at once (priorities
+only set the host thread's, kernel_thread.c). The stop waits for the loading thread's acknowledgement (0x000E73C0
+spins on 0x6B2004), the start does not. The proper fix is to keep the single CPU's order between those two threads
+at their hand-offs; not done yet. Meanwhile a walk parked at a loop gives up after a second and resyncs, so it can
+no longer wait for good. Seen in the same runs: holds of 2-13.6 s at loading screens ("frame wait had lost its
+signal", 23 in 7 of 20 runs), likely the same overlap (both threads use the frame flag 0x4B7601).
+
 **The desync check, and after one (2026-10-24):** the hash both pages compare every 30 frames was the actors'
 positions; it is now every actor's whole object, its first 2 KB. Two offline runs of one scripted fight at Helm's
 Deep, one held 2 s, had all of it identical in all 235 actors at frames 300 and 450, while 118 of its words changed
