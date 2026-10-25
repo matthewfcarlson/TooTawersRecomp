@@ -763,10 +763,21 @@ static void nv2a_pb_run_(uint32_t put_phys, uint32_t init_get_phys)
             }
         }
     }
-    if (looping) {
-        static int said;
-        if (said++ < 8) fprintf(stderr, "  [PB] the push buffer loops at %08X short of PUT %08X: waiting for the title to write on\n", s_get, put);
-        return;
+    {   /* (web port) parked at such a loop for a second with nothing written on: given up, resynced as before -- a
+         * walk parked for good was never "drained", so the GPU-wait watchdogs (twotowers_manual.c) never helped */
+        static uint32_t park_at;
+        static DWORD park_ms;
+        if (looping) {
+            static int said;
+            DWORD now = GetTickCount();
+            if (park_at != s_get) { park_at = s_get; park_ms = now; }
+            if (now - park_ms < 1000u) {
+                if (said++ < 8) fprintf(stderr, "  [PB] the push buffer loops at %08X short of PUT %08X: waiting for the title to write on\n", s_get, put);
+                return;
+            }
+            fprintf(stderr, "  [PB] the push buffer still loops at %08X after %lu ms\n", s_get, (unsigned long)(now - park_ms));
+        }
+        park_at = 0;
     }
     if (s_get != put) {
         unsigned k;
