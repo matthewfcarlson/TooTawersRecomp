@@ -38,9 +38,10 @@
   const server = (q.get('server') || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${local ? location.hostname + ':8787' : location.host}`).replace(/\/$/, '');
   const httpServer = server.replace(/^ws/, 'http');
   const REDUNDANCY = 8;
+  const REC = 22;   // (one frame's record: the pad, 18 bytes, then the host's sound end, 4 -- tt_netplay.c np_snd_*)
 
   const state = { role: null, ws: null, pc: null, dc: null, path: 'connecting', rtt: null, relay: false, desync: null };
-  const sent = new Map();          // frame -> 18 bytes (my inputs, for resending)
+  const sent = new Map();          // frame -> REC bytes (my inputs, for resending)
   const myHashes = new Map(), theirHashes = new Map();
   let newestSent = 0, peerIn = false, relayTimer = null;
 
@@ -80,11 +81,13 @@
   }
 
   // --- from the game ---------------------------------------------------------
-  Module.ttNetInput = (frame, buttons, a0123, a4567, lx, ly, rx, ry) => {
-    const b = new DataView(new ArrayBuffer(18));
+  // (a frame's input: the pad, then 'ev' -- the host's sound end for that frame, tt_netplay.c np_snd_*)
+  Module.ttNetInput = (frame, buttons, a0123, a4567, lx, ly, rx, ry, ev) => {
+    const b = new DataView(new ArrayBuffer(REC));
     b.setUint16(0, buttons, true);
     b.setUint32(2, a0123 >>> 0, true); b.setUint32(6, a4567 >>> 0, true);
     b.setInt16(10, lx, true); b.setInt16(12, ly, true); b.setInt16(14, rx, true); b.setInt16(16, ry, true);
+    b.setUint32(18, (ev || 0) >>> 0, true);
     sent.set(frame, new Uint8Array(b.buffer));
     sent.delete(frame - 64);
     newestSent = Math.max(newestSent, frame);
@@ -113,11 +116,11 @@
 
   function packet() {
     const n = Math.min(REDUNDANCY, newestSent);
-    const out = new Uint8Array(6 + 18 * n), v = new DataView(out.buffer);
+    const out = new Uint8Array(6 + REC * n), v = new DataView(out.buffer);
     v.setUint8(0, 1); v.setUint32(1, newestSent, true); v.setUint8(5, n);
     for (let i = 0; i < n; i++) {
       const f = sent.get(newestSent - i);
-      if (f) out.set(f, 6 + 18 * i);
+      if (f) out.set(f, 6 + REC * i);
     }
     return out;
   }
@@ -135,9 +138,10 @@
       const newest = v.getUint32(1, true), n = v.getUint8(5);
       if (!Module.ttReady) return;
       for (let i = n - 1; i >= 0; i--) {
-        const o = 6 + 18 * i;
+        const o = 6 + REC * i;
         Module._tt_np_remote(newest - i, v.getUint16(o, true), v.getUint32(o + 2, true) | 0, v.getUint32(o + 6, true) | 0,
-                             v.getInt16(o + 10, true), v.getInt16(o + 12, true), v.getInt16(o + 14, true), v.getInt16(o + 16, true));
+                             v.getInt16(o + 10, true), v.getInt16(o + 12, true), v.getInt16(o + 14, true), v.getInt16(o + 16, true),
+                             v.getUint32(o + 18, true) | 0);
       }
     } else if (type === 2) {
       const pong = new Uint8Array(9); pong[0] = 3; pong.set(new Uint8Array(v.buffer, v.byteOffset + 1, 8), 1);

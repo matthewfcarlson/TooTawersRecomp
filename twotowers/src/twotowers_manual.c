@@ -1459,7 +1459,18 @@ void sub_0012F10A(void)
             }
         }
     } 
-    sub_0012F10A_gen();
+    {   /* (netplay) the game's sound update asking whether a sound still plays (through IDirectSoundBuffer_GetStatus,
+         * 0x0012A079 / 0x001293D9: their return addresses here; from 0x000EC520, a channel's, and 0x000EC880, the
+         * sweep of finished sounds): online, the answer both machines agree on (tt_netplay.c, tt_np_voice_busy) */
+        uint32_t out = MEM32(esp + 4), esp0 = esp;
+        sub_0012F10A_gen();
+        if (out && MEM32(esp0) == 0x00129412u && (MEM32(esp0 + 0x1Cu) == 0x000EC567u || MEM32(esp0 + 0x1Cu) == 0x000EC8B3u)) {
+            extern int tt_np_voice_busy(uint32_t voice, int busy_here);
+            uint32_t st = MEM32(out);
+            int here = (st & 5u) != 0, given = tt_np_voice_busy(v, here);   /* (playing, or looping) */
+            if (given != here) MEM32(out) = given ? (st | 1u) : (st & ~5u);
+        }
+    }
 }
 
 /* D3DDevice_SetTexture (0x00117AD0, stdcall stage, texture; ret 8).

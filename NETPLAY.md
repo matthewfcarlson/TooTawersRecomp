@@ -211,6 +211,22 @@ circle there until the CPU wrote on); not yet confirmed, the stall being rare. F
 (`TT_NETPLAY_FROM=menu`, the game started with no level): the title, its films, New Game, the Prologue played,
 the title's difficulty and the credits, the same on both machines throughout.
 
+**The desync after a level's end: a sound's end heard a frame apart (fixed 2026-10-25).** The game waits on
+sounds: the mission map leaves only once the sound of the place chosen has ended (0x0007803F, the handle at +0x214,
+0x000EA390), a channel being free once the game's sound update (0x000EC520 for a channel, 0x000EC880 the sweep) reads
+its buffer's DirectSound status (`GetStatus`, 0x0012F10A) as not playing -- voice flags the emulated sound chip sets
+on real time. Now and then one machine heard the end a frame before the other, left the map a frame early (79
+frames against 78), and from there every input landed a frame apart: the desync early in the next level, with the
+inputs' hash the same on both. Online, a voice's sound now ends for the game when the host's machine heard it end:
+the host sends the voice with a frame's input (`ev`, the record is 22 bytes), and NP_SND_LATER (8) frames after
+that frame both take it as ended; until then it still plays, here as there (`tt_np_voice_busy`, tt_netplay.c; the
+hook in `sub_0012F10A`, twotowers_manual.c, for the sound update's calls only). The map's exit takes 91 frames, the
+same on both. Before: 1 desync in ~20 plain runs, 1 in 7 with packets delayed at random up to 80 ms
+(`TT_JITTER=80`); after: 7 runs in a row (4 jittered) through the level end, the second level, its end and the map
+again, no desync, every screen change on the same frame. Left: a guest whose sound chip ran more than the delay
+plus 8 frames behind the host's would take its still-playing voice for a new sound (no sign of it); XACT cues are
+not covered. Both players need the same page (the packet changed).
+
 **A dropped server connection (2026-10-24):** the page connects again (1, 2, 4... up to 10 s), as a resume
 (`?resume=1`): the other page goes on, where a player's return restarts the level; the inputs lost meanwhile come
 again with the next ones (each packet carries the last eight frames, and the last ones go again every second).

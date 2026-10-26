@@ -135,14 +135,14 @@ static void np_script_frame(uint32_t fr)
 #define NP_RING 256
 static int s_net, s_delay = 3;
 static volatile int s_net_role = -1;   /* 0 host (player 1), 1 guest (player 2); -1 not known yet */
-static struct { volatile uint32_t frame; TTPadState st; } s_remote[NP_RING];
-static struct { uint32_t frame; TTPadState st; } s_local[NP_RING];
-static uint32_t s_input_hash;
+static struct { volatile uint32_t frame; TTPadState st; uint32_t ev; } s_remote[NP_RING];
+static struct { uint32_t frame; TTPadState st; uint32_t ev; } s_local[NP_RING];   /* (ev: the host's sound end, np_snd_*) */
+static uint32_t s_input_hash, s_input_ev;
 
 NP_EXPORT void tt_np_set_role(int guest) { s_net_role = guest ? 1 : 0; }
 
 /* the other player's input for a frame (analog buttons packed four to an int, low byte first) */
-NP_EXPORT void tt_np_remote(int frame, int buttons, int a0123, int a4567, int lx, int ly, int rx, int ry)
+NP_EXPORT void tt_np_remote(int frame, int buttons, int a0123, int a4567, int lx, int ly, int rx, int ry, int ev)
 {
     TTPadState st;
     int i;
@@ -158,11 +158,84 @@ NP_EXPORT void tt_np_remote(int frame, int buttons, int a0123, int a4567, int lx
     st.Gamepad.sThumbLX = (int16_t)lx; st.Gamepad.sThumbLY = (int16_t)ly;
     st.Gamepad.sThumbRX = (int16_t)rx; st.Gamepad.sThumbRY = (int16_t)ry;
     s_remote[k].st = st;
+    s_remote[k].ev = (uint32_t)ev;
     __atomic_store_n(&s_remote[k].frame, (uint32_t)frame, __ATOMIC_RELEASE);
 }
 
 static int np_in_play(void) { uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset); return st == 6 || st == 8; }
 static uint32_t np_pack(const uint8_t *a) { return (uint32_t)a[0] | (uint32_t)a[1] << 8 | (uint32_t)a[2] << 16 | (uint32_t)a[3] << 24; }
+
+/* (netplay) A sound's end, on the same frame on both machines.
+ *
+ * The sound chip runs on real time, so the frame on which a sound is heard to end differs between the two
+ * machines now and then by a frame -- and the game waits on sounds: the mission map leaves only once the sound
+ * of the place chosen has ended (0x0007803F: its handle at +0x214, 0x000EA390), a channel being free once the
+ * game's sound update (0x000EEC60: 0x000EC520 for a channel, 0x000EC880 sweeping the finished sounds out) has
+ * read its buffer's status (DirectSound's GetStatus, twotowers_manual.c sub_0012F10A) as no longer playing. One
+ * machine went on to the next level a frame before the other, and from there every input landed a frame apart:
+ * the desync early in the level after a level's end. Online, a voice's sound now ends for the game when the
+ * host's machine heard it end: the host sends the voice with a frame's input ('ev'), and from NP_SND_LATER
+ * frames after that frame on both machines take it as ended (by then both have heard it end); until then it still
+ * plays, here as there. A voice playing again after its end is a new sound (the game played it: on both machines
+ * at once). */
+#define NP_SND_N 256
+#define NP_SND_LATER 8
+static struct { uint32_t voice; uint8_t ended, sent; } s_snd[NP_SND_N];
+static struct { uint32_t voice, at; } s_snd_due[64];
+static uint32_t s_snd_queue[64];
+static unsigned s_snd_qh, s_snd_qt, s_snd_ndue;
+#if defined(_MSC_VER)
+static __declspec(thread) int np_game_thread;   /* (the thread that ticks the frame timer: tt_netplay_tick) */
+#else
+static _Thread_local int np_game_thread;   /* (the thread that ticks the frame timer: tt_netplay_tick) */
+#endif
+static int s_synced;
+static int np_snd_slot(uint32_t voice)
+{
+    unsigned i, h = (voice >> 2) * 2654435761u >> 24, free_i = NP_SND_N;
+    for (i = 0; i < NP_SND_N; i++) {
+        unsigned k = (h + i) % NP_SND_N;
+        if (s_snd[k].voice == voice) return (int)k;
+        if (!s_snd[k].voice) { free_i = k; break; }
+    }
+    if (free_i == NP_SND_N) {   /* (full: all forgotten, on both machines at the same question -- the voices asked are the game's) */
+        memset(s_snd, 0, sizeof s_snd);
+        free_i = h % NP_SND_N;
+    }
+    s_snd[free_i].voice = voice; s_snd[free_i].ended = s_snd[free_i].sent = 0;
+    return (int)free_i;
+}
+/* whether the game is told a voice plays, heard playing here or not: twotowers_manual.c sub_0012F10A, for the
+ * game's sound update's questions */
+int tt_np_voice_busy(uint32_t voice, int busy_here)
+{
+    static uint32_t spin_frame, spin_n;
+    int k;
+    if (!s_net || !s_synced || !np_game_thread || !voice || (k = np_snd_slot(voice)) < 0) return busy_here;
+    if (spin_frame != s_frame) { spin_frame = s_frame; spin_n = 0; }
+    if (++spin_n > 50000u) {   /* (asked over and over within one frame: a wait that spins without frames) */
+        static int said; if (!said++) fprintf(stderr, "  [NETPLAY] a sound's status waited on without frames (frame %u): its own\n", s_frame);
+        return busy_here;
+    }
+    if (s_snd[k].ended) {
+        if (!busy_here) return 0;
+        s_snd[k].ended = s_snd[k].sent = 0;   /* (played again: a new sound) */
+        return 1;
+    }
+    if (!busy_here && s_net_role == 0 && !s_snd[k].sent && s_snd_qt - s_snd_qh < 64u) { s_snd_queue[s_snd_qt++ % 64u] = voice; s_snd[k].sent = 1; }
+    return 1;
+}
+/* each frame of the session: the host's sound end of this frame (ev, both machines) taken from NP_SND_LATER on */
+static void np_snd_frame(uint32_t fr, uint32_t ev)
+{
+    unsigned i, n = 0;
+    if (ev && s_snd_ndue < 64u) { s_snd_due[s_snd_ndue].voice = ev; s_snd_due[s_snd_ndue].at = fr + NP_SND_LATER; s_snd_ndue++; }
+    for (i = 0; i < s_snd_ndue; i++) {
+        if (s_snd_due[i].at <= fr) { int k = np_snd_slot(s_snd_due[i].voice); if (k >= 0) s_snd[k].ended = 1; }
+        else s_snd_due[n++] = s_snd_due[i];
+    }
+    s_snd_ndue = n;
+}
 
 static void np_net_frame(uint32_t fr)
 {
@@ -173,15 +246,18 @@ static void np_net_frame(uint32_t fr)
     if (xbox_InputGetStateLocal(0, &mine) != 0) memset(&mine, 0, sizeof mine);
     s_local[t & (NP_RING - 1)].frame = t;
     s_local[t & (NP_RING - 1)].st = mine;
+    s_local[t & (NP_RING - 1)].ev = s_net_role == 0 && s_snd_qh != s_snd_qt ? s_snd_queue[s_snd_qh++ % 64u] : 0;   /* (a sound's end, np_snd_*) */
 #if defined(__EMSCRIPTEN__)
-    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttNetInput) Module.ttNetInput($0, $1, $2, $3, $4, $5, $6, $7); },
+    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttNetInput) Module.ttNetInput($0, $1, $2, $3, $4, $5, $6, $7, $8); },
         (int)t, (int)mine.Gamepad.wButtons, (int)np_pack(mine.Gamepad.bAnalogButtons), (int)np_pack(mine.Gamepad.bAnalogButtons + 4),
-        (int)mine.Gamepad.sThumbLX, (int)mine.Gamepad.sThumbLY, (int)mine.Gamepad.sThumbRX, (int)mine.Gamepad.sThumbRY);
+        (int)mine.Gamepad.sThumbLX, (int)mine.Gamepad.sThumbLY, (int)mine.Gamepad.sThumbRX, (int)mine.Gamepad.sThumbRY,
+        (int)s_local[t & (NP_RING - 1)].ev);
 #endif
     /* this frame's: none for the first D, then both players' */
     k = fr & (NP_RING - 1);
     {
         TTPadState local = (fr > (uint32_t)s_delay && s_local[k].frame == fr) ? s_local[k].st : none, remote = none;
+        uint32_t hev = 0;   /* (the host's sound end for this frame, np_snd_*) */
         if (fr > (uint32_t)s_delay) {
             uint32_t waited = 0;
             while (s_net_role < 0 || __atomic_load_n(&s_remote[k].frame, __ATOMIC_ACQUIRE) != fr) {
@@ -197,6 +273,9 @@ static void np_net_frame(uint32_t fr)
             emscripten_thread_sleep(1.0);
 #endif
         }
+        if (fr > (uint32_t)s_delay) hev = s_net_role == 0 ? (s_local[k].frame == fr ? s_local[k].ev : 0) : s_remote[k].ev;
+        np_snd_frame(fr, hev);
+        s_input_ev = hev;
         s_latched[s_net_role] = local;
         s_latched[1 - s_net_role] = remote;
         s_latched[0].dwPacketNumber = s_latched[1].dwPacketNumber = fr;
@@ -222,6 +301,7 @@ static void np_net_frame(uint32_t fr)
         for (i = 0; i < sizeof s_latched[0].Gamepad; i++) ih = (ih ^ b[i]) * 16777619u;
         b = (const uint8_t *)&s_latched[1].Gamepad;
         for (i = 0; i < sizeof s_latched[1].Gamepad; i++) ih = (ih ^ b[i]) * 16777619u;
+        for (i = 0; i < 4; i++) ih = (ih ^ ((s_input_ev >> (8 * i)) & 0xFFu)) * 16777619u;   /* (and the host's sound end) */
         s_input_hash = ih;
     }
     if (fr % 30 == 0 && np_in_play()) {   /* the desync check (in play: its hash is the actors', which outside a level are what freed memory holds) */
@@ -283,7 +363,7 @@ static int s_level_started, s_tick_kind = -1;
  * machine plays it: the same; not the death movie a level keeps open, xbox_FilmPlaying). The game's state
  * between two such stretches is the same on both machines, so the count goes on from the same moment. The port's
  * own menu code keeps the session's time too (tt_ui_ms), and the mouse is left out (fb_present.c). */
-static int s_menus = -1, s_synced;
+static int s_menus = -1;   /* (s_synced: above, np_snd_*) */
 static int np_menus(void)
 {
     if (s_menus < 0) { const char *e = getenv("TT_NETPLAY_MENUS"); s_menus = e && *e && *e != '0'; }
@@ -308,6 +388,7 @@ void tt_netplay_tick(uint32_t caller)   /* (each tick, first: sub_000E3350 with 
     static uint32_t last_waits;
     uint32_t st = *(const volatile uint32_t *)((uintptr_t)NP_GAMESTATE + g_xbox_mem_offset), w = tt_frame_waits;
     tt_timer_caller = caller;
+    np_game_thread = 1;   /* (np_snd_*) */
     if (st != 6 && st != 8 && (s_synced || (st == 4 && np_from_menu()))) {   /* (TT_NETPLAY_MENUS: outside play, once the session began) */
         extern int xbox_FilmPlaying(void);
         int mv = xbox_FilmPlaying();
