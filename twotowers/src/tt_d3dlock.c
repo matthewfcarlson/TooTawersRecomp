@@ -20,9 +20,9 @@
  * Recursive per thread (D3D calls into itself, and a callback may call back in); D3D's interrupt handler is called
  * by the runtime, not by game code, so it never takes the lock and cannot wait on it.
  *
- * Off for now: TT_D3DLOCK=1 turns it on. Under the stress knob (the GPU's semaphore releases held late), level end
- * to the second level: off, 2 of 8 runs corrupted the push buffer and froze; on, 0 of 5, no holds, loads and frame
- * rate the same. Still to run on other levels before it is the default. */
+ * On unless TT_D3DLOCK=0. Under the stress knob (the GPU's semaphore releases held late), level end to the second
+ * level: off, 2 of 8 runs corrupted the push buffer and froze; on, 0 of 5, no holds, loads and frame rate the same;
+ * and on, the Gates and Balin's Tomb through their ends, no hold or freeze. */
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -53,8 +53,8 @@ static int on(void)
 {
     if (s_on < 0) {
         const char *e = getenv("TT_D3DLOCK");
-        s_on = e && *e == '1';
-        if (s_on) fprintf(stderr, "[D3DLOCK] on (TT_D3DLOCK=1): one game thread in D3D at a time\n");
+        s_on = !(e && *e == '0');
+        if (!s_on) fprintf(stderr, "[D3DLOCK] off (TT_D3DLOCK=0): the game's threads in D3D at once\n");
     }
     return s_on;
 }
