@@ -176,11 +176,12 @@ static uint32_t np_pack(const uint8_t *a) { return (uint32_t)a[0] | (uint32_t)a[
  * the desync early in the level after a level's end. Online, a voice's sound now ends for the game when the
  * host's machine heard it end: the host sends the voice with a frame's input ('ev'), and from NP_SND_LATER
  * frames after that frame on both machines take it as ended (by then both have heard it end); until then it still
- * plays, here as there. A voice playing again after its end is a new sound (the game played it: on both machines
- * at once). */
+ * plays, here as there. Once the game has been told a voice ended, the voice is forgotten from the next frame on:
+ * asked again, it plays (the game played it again) until the host hears it end again. (Not by what this machine
+ * hears: a sound played again showed as playing a frame or more apart on the two machines.) */
 #define NP_SND_N 256
 #define NP_SND_LATER 8
-static struct { uint32_t voice; uint8_t ended, sent; } s_snd[NP_SND_N];
+static struct { uint32_t voice; uint8_t ended, sent, told; } s_snd[NP_SND_N];
 static struct { uint32_t voice, at; } s_snd_due[64];
 static uint32_t s_snd_queue[64];
 static unsigned s_snd_qh, s_snd_qt, s_snd_ndue;
@@ -202,7 +203,7 @@ static int np_snd_slot(uint32_t voice)
         memset(s_snd, 0, sizeof s_snd);
         free_i = h % NP_SND_N;
     }
-    s_snd[free_i].voice = voice; s_snd[free_i].ended = s_snd[free_i].sent = 0;
+    s_snd[free_i].voice = voice; s_snd[free_i].ended = s_snd[free_i].sent = s_snd[free_i].told = 0;
     return (int)free_i;
 }
 /* whether the game is told a voice plays, heard playing here or not: twotowers_manual.c sub_0012F10A, for the
@@ -217,11 +218,7 @@ int tt_np_voice_busy(uint32_t voice, int busy_here)
         static int said; if (!said++) fprintf(stderr, "  [NETPLAY] a sound's status waited on without frames (frame %u): its own\n", s_frame);
         return busy_here;
     }
-    if (s_snd[k].ended) {
-        if (!busy_here) return 0;
-        s_snd[k].ended = s_snd[k].sent = 0;   /* (played again: a new sound) */
-        return 1;
-    }
+    if (s_snd[k].ended) { s_snd[k].told = 1; return 0; }   /* (forgotten at the next frame: np_snd_frame) */
     if (!busy_here && s_net_role == 0 && !s_snd[k].sent && s_snd_qt - s_snd_qh < 64u) { s_snd_queue[s_snd_qt++ % 64u] = voice; s_snd[k].sent = 1; }
     return 1;
 }
@@ -229,6 +226,8 @@ int tt_np_voice_busy(uint32_t voice, int busy_here)
 static void np_snd_frame(uint32_t fr, uint32_t ev)
 {
     unsigned i, n = 0;
+    for (i = 0; i < NP_SND_N; i++)   /* (an end the game has been told: forgotten, so a next play of it plays) */
+        if (s_snd[i].told) s_snd[i].ended = s_snd[i].sent = s_snd[i].told = 0;
     if (ev && s_snd_ndue < 64u) { s_snd_due[s_snd_ndue].voice = ev; s_snd_due[s_snd_ndue].at = fr + NP_SND_LATER; s_snd_ndue++; }
     for (i = 0; i < s_snd_ndue; i++) {
         if (s_snd_due[i].at <= fr) { int k = np_snd_slot(s_snd_due[i].voice); if (k >= 0) s_snd[k].ended = 1; }

@@ -116,10 +116,50 @@ static uint64_t sh_actors_whole(void)
 }
 
 
+/* (netplay) The desync check's hash: every actor's whole object as above, but each word only once it has changed
+ * since the check first saw that actor in this stretch of play (0 until then). An object's memory is what the
+ * game's heap held there before, and the game does not write every word of it: two enemies of the Gates' next
+ * level kept, at +0x4A4 and +0x38C, the last values a D3D vertex buffer there had in the level before -- its Lock
+ * field, stamped with each machine's own push-buffer time (NETPLAY.md, the courtyard) -- and the check called a
+ * desync where every actor stood and moved alike to the level's end. A word the game sets or moves counts as
+ * before; a leftover it never touches no longer does. The baseline is taken at the same frames on both machines
+ * (the check runs every 30 frames of the session) and forgotten when play starts again (a gap in those calls). */
+#define SH_BASE_N 1024u
+static uint32_t *sh_base;                 /* (SH_BASE_N actors' first words, as first seen) */
+static uint32_t sh_base_va[SH_BASE_N], sh_base_n, sh_base_last;
+static uint64_t sh_actors_changed(void)
+{
+    extern uint32_t tt_netplay_frame_number(void);
+    const uint32_t *w = (const uint32_t *)((uintptr_t)SH_CONT_LO + g_xbox_mem_offset);
+    uint64_t h = 0x9E3779B97F4A7C15ull;
+    uint32_t i, k, j, p = SH_MEM32(SH_PLAYER), fr = tt_netplay_frame_number();
+    if (!sh_base && !(sh_base = (uint32_t *)malloc((size_t)SH_BASE_N * SH_ACTOR_SIZE))) return sh_actors_whole();
+    if (fr - sh_base_last != 30u) sh_base_n = 0;   /* (play again after a gap: a new level, all new) */
+    sh_base_last = fr;
+    for (i = 0; i < (SH_CONT_HI - SH_CONT_LO - SH_ACTOR_SIZE) / 4u; i++)
+        if (w[i] == SH_ACTOR_VT) {
+            uint32_t va = SH_CONT_LO + 4u * i, *b;
+            for (j = 0; j < sh_base_n && sh_base_va[j] != va; j++) ;
+            if (j == sh_base_n) {
+                if (sh_base_n == SH_BASE_N) return sh_actors_whole();   /* (too many to keep: the whole objects) */
+                sh_base_va[sh_base_n++] = va;
+                memcpy(sh_base + (size_t)j * (SH_ACTOR_SIZE / 4u), &w[i], SH_ACTOR_SIZE);
+            }
+            b = sh_base + (size_t)j * (SH_ACTOR_SIZE / 4u);
+            for (k = 0; k < SH_ACTOR_SIZE / 4u; k += 2) {
+                h = (h ^ (w[i + k] != b[k] ? w[i + k] : 0u)) * 0xFF51AFD7ED558CCDull; h = (h << 31) | (h >> 33);
+                h = (h ^ (w[i + k + 1] != b[k + 1] ? w[i + k + 1] : 0u)) * 0xC4CEB9FE1A85EC53ull; h = (h << 29) | (h >> 35);
+            }
+            i += SH_ACTOR_SIZE / 4u - 1;
+        }
+    if (p) for (i = 0; i < 3; i++) h = (h ^ SH_MEM32(p + 0xF0 + 4 * i)) * 0xC4CEB9FE1A85EC53ull;
+    return h ^ (h >> 29);
+}
+
 /* (netplay) the simulation's hash now, for the desync check (tt_netplay.c) */
 uint64_t tt_statehash_sim(void)
 {
-    return sh_actors_whole();
+    return sh_actors_changed();
 }
 
 void tt_statehash_frame(uint32_t game_ms)

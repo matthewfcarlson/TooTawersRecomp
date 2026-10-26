@@ -227,6 +227,16 @@ again, no desync, every screen change on the same frame. Left: a guest whose sou
 plus 8 frames behind the host's would take its still-playing voice for a new sound (no sign of it); XACT cues are
 not covered. Both players need the same page (the packet changed).
 
+**A false desync after the Gates (fixed 2026-10-25):** the check fired early in the next level in every Gates run
+while every actor stood and moved alike. Two enemies there kept, at +0x4A4 and +0x38C, words the game never writes:
+the last values that memory held in the level before, a per-machine count (we think a D3D vertex buffer's `Lock`
+field). The check now hashes each actor word only once it differs from the actor as the check first saw it in that
+stretch of play (`sh_actors_changed`, tt_statehash.c): leftovers never touched no longer count; a difference already
+there at first sight and never changed is not caught. And the sound fix's "played again" (a voice the host had ended
+heard playing here) read this machine's chip, and parted between the two (596 against 585 in a run): now a voice
+the game was told ended is forgotten at the next frame and plays until the host hears it end again. Five Gates runs
+then, no desync.
+
 **A dropped server connection (2026-10-24):** the page connects again (1, 2, 4... up to 10 s), as a resume
 (`?resume=1`): the other page goes on, where a player's return restarts the level; the inputs lost meanwhile come
 again with the next ones (each packet carries the last eight frames, and the last ones go again every second).
