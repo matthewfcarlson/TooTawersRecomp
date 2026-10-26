@@ -10,14 +10,25 @@
  * GPU's reader lost its place (a freeze a few frames into a new screen; holds of seconds at loading screens).
  * With the lock a thread's D3D call runs whole before another's starts -- the order the console's single CPU kept.
  *
+ * A push-buffer recording is kept whole too. Both threads draw their frames into a recording (the frame's start,
+ * 0x000E01E0, calls BeginPushBuffer at 0x000E026D; its end, 0x000E0280, EndPushBuffer at 0x000E033D), and while
+ * one records, the device's put pointer is the recording's: anything another thread put in then went into that
+ * recording, not the GPU's stream -- the flush's callback (0x000E08D0: InsertCallback(2), kick, wait for 0x1BB3BC
+ * to read 2) never ran, and the flush waited for the watchdog (300 ms). A thread that leaves D3D with the device
+ * recording (its flags' bit 2) keeps the lock until it leaves with the recording ended.
+ *
  * Recursive per thread (D3D calls into itself, and a callback may call back in); D3D's interrupt handler is called
  * by the runtime, not by game code, so it never takes the lock and cannot wait on it.
  *
- * Off for now: TT_D3DLOCK=1 turns it on, until a stress comparison (the GPU's semaphore releases held late, which
- * shows the overlap) says it does what it should without slowing the loads. */
+ * Off for now: TT_D3DLOCK=1 turns it on. Under the stress knob (the GPU's semaphore releases held late), level end
+ * to the second level: off, 2 of 8 runs corrupted the push buffer and froze; on, 0 of 5, no holds, loads and frame
+ * rate the same. Still to run on other levels before it is the default. */
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
+extern ptrdiff_t g_xbox_mem_offset;
+#define DEV_MEM32(a) (*(volatile uint32_t *)((uintptr_t)(uint32_t)(a) + g_xbox_mem_offset))
 #if defined(_WIN32)
 #include <windows.h>
 static CRITICAL_SECTION s_cs;
@@ -35,6 +46,7 @@ static void unlock(void) { pthread_mutex_unlock(&s_mu); }
 #endif
 
 static TLS int s_depth;
+static TLS int s_rec;   /* this thread left D3D with the device recording: it keeps the lock until the recording ends */
 static int s_on = -1;
 
 static int on(void)
@@ -50,11 +62,15 @@ static int on(void)
 void tt_d3d_enter(void)
 {
     if (!on()) return;
-    if (s_depth++ == 0) lock();
+    if (s_depth++ == 0 && !s_rec) lock();
 }
 
 void tt_d3d_leave(void)
 {
     if (!on()) return;
-    if (s_depth > 0 && --s_depth == 0) unlock();
+    if (s_depth > 0 && --s_depth == 0) {
+        uint32_t dev = DEV_MEM32(0x00124180u);   /* (D3D's device; flags at +8, bit 2: recording a push buffer) */
+        s_rec = dev && (DEV_MEM32(dev + 8) & 4u);
+        if (!s_rec) unlock();
+    }
 }
