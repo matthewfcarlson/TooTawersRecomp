@@ -382,6 +382,7 @@
        <kbd>K</kbd> A (jump) · <kbd>J</kbd> X (fast attack) · <kbd>I</kbd> Y (fierce attack) · <kbd>L</kbd> B (parry) ·
        <kbd>F</kbd>/<kbd>R</kbd> left/right trigger · <kbd>Enter</kbd> Start · <kbd>Backspace</kbd> Back ·
        arrows: d-pad</p>
+    <p>Hold <kbd>Enter</kbd> (Start) over a film to skip it. Playing together, both of you hold it: you see when your friend has.</p>
     <p>Controllers (Xbox, PlayStation, Switch Pro, …) work too: press a button on one so the browser shows it.</p>
     <p>Settings go in the address: <code>?TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1</code>
        starts in the first level. Any <code>KEY=VALUE</code> becomes one of the game's switches.</p>
@@ -640,6 +641,7 @@
       if (!padsSeen.has(k)) { padsSeen.add(k); log(`[WEB] controller ${k + 1}: ${gp.id} (${gp.mapping || 'no standard mapping'})`); }
       let buttons = 0;
       for (let i = 0; i < XI.length && i < gp.buttons.length; i++) if (XI[i] && press(gp.buttons[i])) buttons |= XI[i];
+      if (self.ttPadFilter) buttons = self.ttPadFilter(k, buttons);   // (filmskip.js: Start held over a film)
       const trig = (i) => Math.round(Math.max(0, Math.min(1, gp.buttons[i]?.value ?? 0)) * 255);
       const ps = /054c|dualsense|dualshock|playstation/i.test(gp.id) ? (/dualsense|0ce6|0df2/i.test(gp.id) ? 5 : 4) : 0;
       Module._tt_web_pad(k, 1, buttons, trig(6), trig(7),
@@ -659,6 +661,7 @@
   function key(e, down) {
     startAudio().catch((err) => log('[WEB] sound could not start: ' + err));
     if (ended || !ready) return;
+    if (self.ttKeyFilter?.(e.keyCode, down)) { e.preventDefault(); return; }   // (filmskip.js: Enter held over a film)
     Module._tt_web_key(e.keyCode, down ? 1 : 0);
     e.preventDefault();
   }
@@ -687,6 +690,7 @@
 <script src="saves.js"></script>
 <script src="lobby.js"></script>
 <script src="netplay.js"></script>
+<script src="filmskip.js"></script>
 <!-- the game (twotowers_recomp.js) starts from here once its files are there -->
 <script src="import.js"></script>
 </body>

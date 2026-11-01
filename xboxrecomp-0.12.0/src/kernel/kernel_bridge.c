@@ -684,6 +684,9 @@ int xbox_MoviePlaying(void) { return g_movie_handle != 0; }
  * level and closed when it ends, at no fixed moment of the game's own */
 static volatile int g_movie_death;
 int xbox_FilmPlaying(void) { return g_movie_handle != 0 && !g_movie_death; }
+/* (web port) the playing film's name as a number (nonzero), 0 if none or the death movie: tt_filmskip.c */
+static volatile uint32_t g_movie_id;
+uint32_t xbox_FilmId(void) { return xbox_FilmPlaying() ? g_movie_id : 0; }
 static void bridge_NtClose(void)
 {
     uint32_t raw_handle = STACK_ARG(0);
@@ -3260,7 +3263,10 @@ static void bridge_NtCreateFile(void)
             /* (testing, coop-anything) TT_SKIPMOVIES: the movie reported missing, so bot runs don't sit through it
              * (the levels' preloaded death movie kept: the game-over death cam uses it). The host handle is left open. */
             if (getenv("TT_SKIPMOVIES") && !wcsstr(w, L"death") && !wcsstr(w, L"DEATH")) { g_eax = 0xC0000034u; fprintf(stderr, "  [MOVIE] skipped (TT_SKIPMOVIES)\n"); }
-            else { g_movie_handle = BRIDGE_MEM32(handle_va); g_movie_death = wcsstr(w, L"death") || wcsstr(w, L"DEATH"); }
+            else { g_movie_handle = BRIDGE_MEM32(handle_va); g_movie_death = wcsstr(w, L"death") || wcsstr(w, L"DEATH");
+                /* (web port) the film's name as a number, the same on both machines (tt_filmskip.c: a skip's vote) */
+                { uint32_t hsh = 2166136261u; size_t k; for (k = 0; k < n; k++) hsh = (hsh ^ (uint32_t)(w[k] | 0x20)) * 16777619u;
+                  g_movie_id = hsh | 1u; fprintf(stderr, "  [MOVIE] %ls (film %08X)\n", w, g_movie_id); } }
         }
     }
 

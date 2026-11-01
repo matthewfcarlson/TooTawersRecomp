@@ -140,6 +140,14 @@ static struct { uint32_t frame; TTPadState st; uint32_t ev; } s_local[NP_RING]; 
 static uint32_t s_input_hash, s_input_ev;
 
 NP_EXPORT void tt_np_set_role(int guest) { s_net_role = guest ? 1 : 0; }
+/* (web port) Skipping a film together (tt_filmskip.c, web/filmskip.js): a player who held Start over the film
+ * playing says so in each input record from then on (NP_FILM_VOTE, a bit no pad has), and on the first frame
+ * both players' records say so, both machines end it -- the same frame, as a film before a level is played in
+ * frames like play's. The bit is taken off before the game reads the pads. */
+#define NP_FILM_VOTE 0x0800u
+static volatile uint32_t s_film_vote;
+NP_EXPORT void tt_web_film_vote(uint32_t id) { s_film_vote = id; }
+int tt_netplay_film_lockstep(void);
 
 /* the other player's input for a frame (analog buttons packed four to an int, low byte first) */
 NP_EXPORT void tt_np_remote(int frame, int buttons, int a0123, int a4567, int lx, int ly, int rx, int ry, int ev)
@@ -243,6 +251,9 @@ static void np_net_frame(uint32_t fr)
     memset(&none, 0, sizeof none);
     /* the local player's input now is frame fr + D's */
     if (xbox_InputGetStateLocal(0, &mine) != 0) memset(&mine, 0, sizeof mine);
+    {   extern uint32_t xbox_FilmId(void);
+        mine.Gamepad.wButtons &= (uint16_t)~NP_FILM_VOTE;
+        if (s_film_vote && s_film_vote == xbox_FilmId()) mine.Gamepad.wButtons |= NP_FILM_VOTE; }   /* (a film's skip) */
     s_local[t & (NP_RING - 1)].frame = t;
     s_local[t & (NP_RING - 1)].st = mine;
     s_local[t & (NP_RING - 1)].ev = s_net_role == 0 && s_snd_qh != s_snd_qt ? s_snd_queue[s_snd_qh++ % 64u] : 0;   /* (a sound's end, np_snd_*) */
@@ -275,6 +286,20 @@ static void np_net_frame(uint32_t fr)
         if (fr > (uint32_t)s_delay) hev = s_net_role == 0 ? (s_local[k].frame == fr ? s_local[k].ev : 0) : s_remote[k].ev;
         np_snd_frame(fr, hev);
         s_input_ev = hev;
+        {   /* a film's skip: both players' votes in this frame's records (NP_FILM_VOTE) */
+            extern uint32_t xbox_FilmId(void);
+            extern int tt_film_skip_now(uint32_t id);
+            static uint32_t done;
+            uint32_t id = xbox_FilmId();
+            if (!id) done = 0;
+            if ((local.Gamepad.wButtons & NP_FILM_VOTE) && (remote.Gamepad.wButtons & NP_FILM_VOTE) && id && id != done) {
+                done = id;
+                fprintf(stderr, "  [NETPLAY] frame %u: both players skip the film\n", fr);
+                tt_film_skip_now(id);
+            }
+            local.Gamepad.wButtons &= (uint16_t)~NP_FILM_VOTE;
+            remote.Gamepad.wButtons &= (uint16_t)~NP_FILM_VOTE;
+        }
         s_latched[s_net_role] = local;
         s_latched[1 - s_net_role] = remote;
         s_latched[0].dwPacketNumber = s_latched[1].dwPacketNumber = fr;
@@ -407,6 +432,7 @@ void tt_netplay_tick(uint32_t caller)   /* (each tick, first: sub_000E3350 with 
     last_waits = w;
 }
 int tt_netplay_tick_kind(void) { return s_tick_kind; }
+int tt_netplay_film_lockstep(void) { return s_net && s_tick_kind == 1; }   /* (a film in frames: its skip goes by the votes in the records) */
 static uint32_t np_real_ms(void)
 {
 #if defined(_WIN32)

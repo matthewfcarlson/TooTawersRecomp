@@ -102,6 +102,7 @@ set(GAME_SOURCES
     src/tt_netplay.c
     src/tt_heap.c          # (web port) the game heap's size
     src/tt_d3dlock.c       # (web port) one game thread in D3D at a time
+    src/tt_filmskip.c      # (web port) Start held skips a film (the page: index.html, netplay.js)
     # Add game-specific sources here, e.g.:
     # src/asset_loader.c
     # src/custom_renderer.c

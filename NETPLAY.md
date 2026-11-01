@@ -249,6 +249,19 @@ DPCs) at real 60 Hz; the APU updates DirectSound's state; the loader streams. An
 those must be tied to game frames. A desync check must then hash more than positions: the frame-1,128 diff of the
 first failure showed orientations differing before positions did.
 
+### Skipping a film together (2026-11-01)
+
+Holding Start (a controller's, or Enter) over a film skips it (web/filmskip.js, twotowers/src/tt_filmskip.c).
+Playing together it is a vote: your friend's screen shows that you want to skip ("Your friend wants to skip ✓ ·
+Hold START to agree"), and the film ends once both have held it. The film before a level is played in frames,
+as play is, so it has to end on the same frame on both machines. Ended when each page heard the other's vote, it
+ended at film frames 210 and 212, and the games desynced 30 frames later. So each player's vote goes in their
+input records (a button bit no pad has, 0x0800, taken off before the game reads the pads), and both machines end
+the film on the first frame where both records carry it. Checked on the Gates of Moria's film: both ended it at
+frame 207 and played on in step. The films outside the lockstep (the intros) the pages end themselves once both
+have voted. While a film can be skipped Start does not reach the game, and after a skip not until it is let go,
+so a Start still held does not pause the level that follows.
+
 ## Transport on Cloudflare
 
 Researched 2026-10-22 from Cloudflare's docs (sources below). Lockstep is sensitive to **jitter and loss** more
