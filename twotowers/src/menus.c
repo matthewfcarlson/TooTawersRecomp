@@ -228,6 +228,13 @@ static int mm_shown(uint32_t scr)
     uint32_t nx = G32(scr + 4);
     return mm_here(scr) || (scr == MM_OBJ && G32(FE_SCREEN) == 4 && G32(scr + 0x10) == 3 && (nx == 2 || nx == 3 || nx == 5));
 }
+/* (netplay) online, New Game and Load Game from the main menu would start a solo game the other player only watches:
+ * they are shown dimmed and a press on them does nothing; the cursor starts on Co-op (its New / Load go on through
+ * the main menu's items with co-op kept on: s_coop_keep). The same on both machines: xbox_input_netplay is set on
+ * both, and the press tested is the frame's latched input. */
+#define COL_NA_ON   0x809FD2F0u   /* (the dimmed items: chosen, not) */
+#define COL_NA_OFF  0x6028364Eu
+static int mm_online(void) { extern volatile int xbox_input_netplay; return xbox_input_netplay; }
 static int s_coop_opening;   /* Co-op chosen: the game leaves as for Options (item 2), Co-op stays lit */
 static int s_coop_keep;      /* the next New / Load press is the Co-op menu's (co-op kept on) */
 static volatile int tt_coop_cover;   /* the Co-op menu's New / Load on their way: the screen black (ptr_overlay) */
@@ -280,6 +287,14 @@ void tt_mm_colors_post(uint32_t scr)
 {
     if (G32(scr + 0x14) >= 4) { G32(MM_TABLE + 12 * EL_SIZE + 0x20) = s_keep; G32(MM_TABLE + 13 * EL_SIZE + 0x20) = s_keep2; }   /* (its write for a choice of 4 or 5 lands past its table) */
     if (s_coop_opening && mm_shown(scr)) G32(MM_TABLE + 10 * EL_SIZE + 0x20) = COL_OFF;   /* (Options, the item the game was handed) */
+    if (mm_online() && mm_shown(scr)) {   /* (online: New Game and Load Game dimmed) */
+        static int was_here;
+        int i, here = mm_here(scr);
+        if (here && !was_here && G32(scr + 0x14) <= 1) { G32(scr + 0x14) = ITEM_COOP; swoosh_to(ITEM_COOP); tt_dbg("[MENU] online: the cursor on Co-op (New Game, Load Game off)\n"); }
+        was_here = here;
+        if (!tt_coop_cover)   /* (the Co-op menu's own press, under its black cover: the game's colours) */
+            for (i = 0; i <= 1; i++) G32(MM_TABLE + (8 + i) * EL_SIZE + 0x20) = G32(scr + 0x14) == (uint32_t)i ? COL_NA_ON : COL_NA_OFF;
+    }
     if (!mm_here(scr)) return;
     if (G32(scr + 0x14) >= 4) G32(MM_CREDITS + 0x20) = COL_OFF;
     if (s_exit_go) {
@@ -317,6 +332,7 @@ static int tt_mm_input(unsigned long port, int a_down, int start_down)
         return 0;
     }
     if (edge && cur <= 1 && s_coop_keep) { s_coop_keep = 0; tt_coop_menu_on = 1; tt_dbg("[MENU] %s from the Co-op menu: co-op on\n", cur ? "Load Game" : "New Game"); return 0; }
+    if (cur <= 1 && mm_online() && !tt_coop_cover) { if (edge) tt_dbg("[MENU] online: %s is off (co-op only)\n", cur ? "Load Game" : "New Game"); return 1; }   /* (netplay: see mm_online) */
     if (edge && cur <= 1 && tt_coop_menu_on) { tt_coop_menu_on = 0; tt_dbg("[MENU] %s chosen: co-op off (solo)\n", cur ? "Load Game" : "New Game"); }
     if (!exit_on() || cur != ITEM_EXIT) return 0;
     if (edge) s_exit_go = 1;
