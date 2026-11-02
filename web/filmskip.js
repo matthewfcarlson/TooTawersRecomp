@@ -13,6 +13,10 @@
 // say so, the same frame on both machines (tt_netplay.c). Films outside the
 // lockstep (the intros) the pages end themselves once both have voted.
 //
+// Online, the title's attract demo: Start (a tap) ends it on both machines --
+// the game's own Start never reaches it online (tt_filmskip.c, tt_web_attract_end):
+//   {type:"attract-end"}       I ended the demo, end yours
+//
 // While a film can be skipped, Start does not reach the game (it does nothing
 // in a film), and after a skip not until it is let go: a Start still held
 // would pause the level that follows.
@@ -67,10 +71,12 @@
   // the vote
   let film = 0, since = 0, held = 0, mine = 0, skipped = 0, tries = 0;
   const theirs = new Set();   // the films the other player wants to skip (one may come before the film starts here)
+  let attractWanted = 0, attractWas = false, attractEnding = 0;   // (the other player's end of the demo, until ours plays: 3 s)
   if (online) {
     const listen = (type, fn) => ((self.ttNetListeners ??= {})[type] ??= []).push(fn);
     listen('film-skip', (m) => { theirs.add(m.film >>> 0); });
-    listen('peer-left', () => theirs.clear());
+    listen('attract-end', () => { attractWanted = performance.now(); });
+    listen('peer-left', () => { theirs.clear(); attractWanted = 0; });
   }
   const log = (t) => (Module.printErr || console.log)('[FILMSKIP] ' + t);
   function skip() {
@@ -92,6 +98,22 @@
       film = f; since = now; held = 0; mine = 0; tries = 0;
     }
     if (swallow && !startDown()) swallow = false;
+    if (online && Module._tt_web_attract) {   // the attract demo: a Start here or the other player's ends it on both
+      const on = !!Module._tt_web_attract(), down = startDown() && !swallow;
+      // (put at its end again while it plays on, for a second: a frame the movie's own thread was writing as ours
+      // landed undid it -- seen on the guest, its demo played on)
+      if (on && attractEnding && now - attractEnding < 1000) Module._tt_web_attract_end();
+      else if (on && attractWanted && now - attractWanted < 3000) {
+        attractWanted = 0; swallow = startDown(); attractEnding = now;
+        if (Module._tt_web_attract_end()) log('the attract demo ended (the other player\'s Start)');
+      } else if (on && down && !attractWas) {
+        swallow = true; attractEnding = now;
+        if (Module._tt_web_attract_end()) { self.ttNetSend?.({ type: 'attract-end' }); log('the attract demo ended (Start)'); }
+      }
+      if (!on) attractEnding = 0;
+      attractWas = on && down;
+      if (attractWanted && now - attractWanted >= 3000) attractWanted = 0;
+    }
     if (!film || skipped === film) { el.classList.remove('on'); return; }
 
     const down = startDown() && !swallow;

@@ -687,6 +687,8 @@ int xbox_FilmPlaying(void) { return g_movie_handle != 0 && !g_movie_death; }
 /* (web port) the playing film's name as a number (nonzero), 0 if none, the death movie or the attract demo: tt_filmskip.c */
 static volatile uint32_t g_movie_id;
 uint32_t xbox_FilmId(void) { return xbox_FilmPlaying() ? g_movie_id : 0; }
+static volatile int g_movie_attract;   /* (the attract demo playing: online, its Start ended on both machines, tt_filmskip.c) */
+int xbox_AttractPlaying(void) { return g_movie_handle != 0 && g_movie_attract; }
 static void bridge_NtClose(void)
 {
     uint32_t raw_handle = STACK_ARG(0);
@@ -3266,7 +3268,8 @@ static void bridge_NtCreateFile(void)
             else { g_movie_handle = BRIDGE_MEM32(handle_va); g_movie_death = wcsstr(w, L"death") || wcsstr(w, L"DEATH");
                 /* (web port) the film's name as a number, the same on both machines (tt_filmskip.c: a skip's vote) */
                 { uint32_t hsh = 2166136261u; size_t k; for (k = 0; k < n; k++) hsh = (hsh ^ (uint32_t)(w[k] | 0x20)) * 16777619u;
-                  g_movie_id = wcsstr(w, L"attract") || wcsstr(w, L"ATTRACT") ? 0u : hsh | 1u;   /* (not the attract demo: Start ends it, the game's own) */ fprintf(stderr, "  [MOVIE] %ls (film %08X)\n", w, g_movie_id); } }
+                  g_movie_attract = wcsstr(w, L"attract") || wcsstr(w, L"ATTRACT");
+                  g_movie_id = g_movie_attract ? 0u : hsh | 1u;   /* (not the attract demo: Start ends it, the game's own) */ fprintf(stderr, "  [MOVIE] %ls (film %08X)\n", w, g_movie_id); } }
         }
     }
 

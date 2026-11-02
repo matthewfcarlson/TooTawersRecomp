@@ -518,7 +518,9 @@ void tt_netplay_frame(void)
     if (!on) return;
     if (np_menus()) {   /* (the session's frames, from the first in play or the main menu's: tt_netplay_tick) */
         if (!s_synced) {
-            if (s_tick_kind != 1 || !(st == 6 || st == 8 || (st == 4 && np_from_menu()))) return;
+            /* (TT_NETPLAY_FROM=menu: the main menu only -- the title's idle demo, the attract film, is play (state
+             * 6): a session begun there had Start, which ends the demo, in lockstep with a player still on the title) */
+            if (s_tick_kind != 1 || !(np_from_menu() ? st == 4 : st == 6 || st == 8)) return;
             s_synced = 1;
             fprintf(stderr, "  [NETPLAY] the session begins: %s\n", st == 4 ? "the main menu" : "play");
         }

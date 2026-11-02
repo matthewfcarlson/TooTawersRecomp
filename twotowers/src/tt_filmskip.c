@@ -75,22 +75,58 @@ static int fs_find(uint32_t *out, int max)
     return n;
 }
 
-/* ends the film (the game's thread, online: tt_netplay.c, on the frame both votes are in) */
-int tt_film_skip_now(uint32_t id)
+/* the playing movie put at its last frame: 0 its HBINK not found (or at its end); *at: where it was */
+static uint32_t fs_end(uint32_t *at)
 {
     uint32_t c[16], best = 0, bestfn = 0;
     int n, i;
-    if (!id || xbox_FilmId() != id) return 0;
     n = fs_find(c, 16);
     for (i = 0; i < n; i++) {
         uint32_t fr = FS_MEM32(c[i] + 8), fn = FS_MEM32(c[i] + 0xC);
         fprintf(stderr, "[FILMSKIP] a film at %08X: frame %u of %u\n", c[i], fn, fr);
         if (fn >= 2 && fn < fr - 1 && fn > bestfn) { best = c[i]; bestfn = fn; }
     }
-    if (!best) { fprintf(stderr, "[FILMSKIP] film %08X: its movie not found (or at its end)\n", id); return 0; }
-    FS_MEM32(best + 0xC) = FS_MEM32(best + 8) - 1;
-    fprintf(stderr, "[FILMSKIP] film %08X skipped at frame %u (state %u)\n", id, bestfn, FS_MEM32(FS_GAMESTATE));
+    if (best) FS_MEM32(best + 0xC) = FS_MEM32(best + 8) - 1;
+    if (at) *at = best;
+    return best ? bestfn : 0;
+}
+
+/* ends the film (the game's thread, online: tt_netplay.c, on the frame both votes are in) */
+int tt_film_skip_now(uint32_t id)
+{
+    uint32_t fn;
+    if (!id || xbox_FilmId() != id) return 0;
+    if (!(fn = fs_end(NULL))) { fprintf(stderr, "[FILMSKIP] film %08X: its movie not found (or at its end)\n", id); return 0; }
+    fprintf(stderr, "[FILMSKIP] film %08X skipped at frame %u (state %u)\n", id, fn, FS_MEM32(FS_GAMESTATE));
     return 1;
+}
+
+/* (online) the title's attract demo: solo, Start ends it (the game's own); online its ticks are outside the lockstep
+ * and get a controller at rest (tt_netplay.c, np_latch), so Start never reached it and the demo played to its end.
+ * The page ends it instead, on both machines: a Start pressed here, or the other player's (filmskip.js). Outside the
+ * lockstep, as the intro films' skips: each machine back on the title waits there for the other's frames. */
+static uint32_t s_attract_at, s_attract_frames;   /* (the demo's HBINK, once found: the page ends it again a while) */
+FS_EXPORT int tt_web_attract(void)
+{
+    extern int xbox_AttractPlaying(void);
+    int on = xbox_AttractPlaying();
+    if (!on) s_attract_at = 0;
+    return on;
+}
+FS_EXPORT int tt_web_attract_end(void)
+{
+    uint32_t fn;
+    if (!tt_web_attract()) return 0;
+    if (s_attract_at) {   /* again: that HBINK only (scanned again, past its movie's end, others matched: not movies) */
+        if (FS_MEM32(s_attract_at + 8) != s_attract_frames) { s_attract_at = 0; return 0; }
+        if (FS_MEM32(s_attract_at + 0xC) < s_attract_frames - 1) FS_MEM32(s_attract_at + 0xC) = s_attract_frames - 1;
+        return 1;
+    }
+    fn = fs_end(&s_attract_at);
+    if (s_attract_at) s_attract_frames = FS_MEM32(s_attract_at + 8);
+    if (fn) fprintf(stderr, "[FILMSKIP] the attract demo ended at frame %u\n", fn);
+    else fprintf(stderr, "[FILMSKIP] the attract demo: its movie not found\n");
+    return fn != 0;
 }
 
 /* the page's skip: 1 ended, 0 not (no such film), -1 left to the lockstep -- online, a film played in frames
