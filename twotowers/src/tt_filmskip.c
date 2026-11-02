@@ -6,7 +6,8 @@
  *
  *   tt_web_film()       the film playing now, as a number (its file's name,
  *                       the same on both machines), or 0: none, the death
- *                       movie a level keeps open, or the main menu's.
+ *                       movie a level keeps open, the attract demo (Start
+ *                       ends it already, the game's own), or the main menu's.
  *   tt_web_film_skip(id) ends that film, if it is still the one playing
  *                       (online, a film played in frames is left to the
  *                       lockstep: tt_web_film_vote, tt_netplay.c).
