@@ -370,6 +370,7 @@
     <button id="btn-invite" type="button" hidden>Copy invite link</button>
     <button id="btn-keys" type="button" aria-pressed="false" aria-controls="keys">Keys</button>
     <button id="btn-log" type="button" aria-pressed="false" aria-controls="log">Log</button>
+    <button id="btn-export" type="button" title="Save the game's log as a file, to send along with a bug report">Export log</button>
     <button id="btn-full" type="button">Fullscreen</button>
   </div>
   <div id="stage"><canvas id="screen" width="640" height="480" tabindex="0"></canvas>
@@ -432,10 +433,22 @@
   const keyLines = [];   // the lines worth keeping whatever scrolls past (web/tools read them)
   let allLines = null;   // ?TT_WEB_LOGALL=1: every line, taken in batches by web/tools/coop-suite.mjs
   const KEY = /\[(INPUT|WEB|GL|AUDIO|ULTRA|NETPLAY|NPKIND|CRASH|EXIT|BOOT|FILL)\]|Aborted|RuntimeError/;
+  // (export) a longer history than the panel's, and the lines that say how a long session went kept whatever scrolls
+  // past: memory, slow steps, films, frame rate, hangs, the online match -- each with the seconds since the page began
+  const history = [];
+  const diagLines = [];
+  const tLog0 = performance.now();
+  const DIAG = /\[(MEM|SLOW|FILMSTATE|FRAMETIME|PERF|HANG|SOAK|NETPLAY|NPKIND|CRASH|EXIT|BOOT|WASM|ALLOC)\]|Aborted|RuntimeError|Cannot enlarge|OOM/;
   function log(text) {
     if (KEY.test(text) && keyLines.length < 2000) keyLines.push(text);
     lines.push(text);
     allLines?.push(text);
+    history.push(text);
+    if (history.length > 40000) history.splice(0, 10000);
+    if (DIAG.test(text)) {
+      diagLines.push(((performance.now() - tLog0) / 1000).toFixed(1).padStart(8) + 's ' + text.trim());
+      if (diagLines.length > 30000) diagLines.splice(0, 5000);
+    }
     if (lines.length > 4000) lines.splice(0, 1000);
     if (!logDirty) {
       logDirty = true;
@@ -449,6 +462,46 @@
   self.ttLogLines = lines;   // (for web/tools/browser-check.mjs)
   self.ttKeyLines = keyLines;
   function status(text, bad) { statusEl.textContent = text; statusEl.className = bad ? 'bad' : ''; }
+
+  // Export log: the file to send with a report. The header says what ran it; then the diagnostic lines of the whole
+  // session; then the last lines of everything. A snapshot goes to IndexedDB every 20 s, so a tab that crashed outright
+  // leaves its log for the next visit (the button then saves that one too, as "-previous").
+  const idb = (fn) => new Promise((res) => {
+    try {
+      const r = indexedDB.open('tt-log', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('s');
+      r.onerror = () => res(null);
+      r.onsuccess = () => { try { fn(r.result.transaction('s', 'readwrite').objectStore('s'), res); } catch { res(null); } };
+    } catch { res(null); }
+  });
+  function logReport() {
+    const mem = performance.memory ? ` JS heap ${Math.round(performance.memory.usedJSHeapSize / 1048576)} MB` : '';
+    const head = [
+      'The Two Towers (web) log, ' + new Date().toISOString(),
+      'page: ' + location.href.replace(/(pass|secret)=[^&]*/g, '$1=…'),
+      'browser: ' + navigator.userAgent,
+      'cores ' + navigator.hardwareConcurrency + ', device memory ' + (navigator.deviceMemory ?? '?') + ' GB,' + mem,
+      'up ' + Math.round((performance.now() - tLog0) / 1000) + ' s; status: ' + statusEl.textContent,
+      '', '=== diagnostic lines (' + diagLines.length + ', whole session) ===',
+    ];
+    return head.concat(diagLines, ['', '=== last ' + history.length + ' lines ==='], history).join('\n');
+  }
+  function saveFile(name, text) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+    a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  }
+  let prevReport = null;
+  idb((st, res) => { const g = st.get('last'); g.onsuccess = () => res(g.result || null); g.onerror = () => res(null); }).then((r) => { prevReport = r; });
+  setInterval(() => { const text = logReport(); idb((st, res) => { st.put(text, 'last'); res(true); }); }, 20000);
+  document.getElementById('btn-export').onclick = () => {
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    saveFile(`twotowers-log-${stamp}.txt`, logReport());
+    if (prevReport) saveFile(`twotowers-log-${stamp}-previous-visit.txt`, prevReport);
+    canvas.focus();
+  };
 
   if (!self.crossOriginIsolated) {
     status('This page needs cross-origin isolation for threads. Serve it with web/serve.mjs.', true);
