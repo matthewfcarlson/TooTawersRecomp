@@ -37,6 +37,10 @@ void *w32_reserve_arena(size_t size, size_t align)
     if (s_arena_lo) return (void *)s_arena_lo;
     /* dlmalloc takes a request this size from fresh sbrk memory, which the
      * engine zero-fills on demand; nothing but the chunk header is written */
+    {   /* (memory study) what the heap held before the arena */
+        extern void *sbrk(intptr_t);
+        fprintf(stderr, "  [WASM] heap top before the guest address space: %zu MB\n", (size_t)sbrk(0) >> 20);
+    }
     p = memalign(align ? align : ARENA_PG, size);
     if (!p) return NULL;
     s_arena_used = (uint8_t *)calloc(size / ARENA_PG + 1, 1);

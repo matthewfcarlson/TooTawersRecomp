@@ -17,7 +17,7 @@ Written 2026-10-22, at the start of the fork; the status below was updated 2026-
 in a level, sound, keyboard and controllers, saves kept in the browser, and the Ultra textures (the GLOS69 pack).
 One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. What it took:
 
-- **Memory:** the guest's 4 GB as one untouched allocation in a fixed 8 GB linear memory, views claimed at
+- **Memory:** the guest's 4 GB as one untouched allocation in a fixed 6 GB linear memory, views claimed at
   `va + offset` as on the desktop (`win32_compat_wasm_mem.inc`). Second views can't alias: the RAM mirrors and the
   tiled view at 0xF0000000 are refused and logged; the game plays without them.
 - **Device traps:** only the APU (pointer accesses from DirectSound) and AC'97 trapped on the desktop; the GPU never
@@ -189,3 +189,18 @@ compact arena of three 64 MB slots (low, 0x80000000, 0xFC000000) would hold ever
 `lin = ((t >> 5) + (t & 1)) << 26 | (a & 0x3FFFFFF)` with `t = a >> 26`, in place of 4 GB. The cost is every
 guest-to-host conversion: `XBOX_PTR`, `XBOX_TO_NATIVE` (about 360 uses outside the generated code) and 77 direct
 `+ g_xbox_mem_offset` uses, plus the inverse (host pointer back to a guest address: `kernel_rtl.c`, the fault handler).
+
+## Where the heap beyond the guest's 4 GB went (measured 2026-11-09)
+
+Headless Chrome with the GPU: the whole browser holds 1.2-1.9 GB, not the 6-8 GB of the linear memory (the guest's 4 GB
+is address space, touched in about 50 MB). The fixed heap's top was 5053 MB at the level start: 172 MB before the arena,
+71 MB for the dispatch table, and about 650 MB of **64 MB host stacks, one per helper thread** (GPU ack and render,
+timers, watchdogs: `CreateThread` with size 0), plus 64 MB for each thread that runs the game's code. Helpers now get 8 MB
+(`win32_compat.c`; the game's threads ask for 64 MB in `bridge_spawn_thread`): 4549 MB.
+
+The leak: `CreateThread` made joinable pthreads and nothing ever joined them (waits use the object's condition), so a
+thread that ended kept its stack and its Web Worker for good, and the game starts threads around every film and level.
+They are detached now (web only). The 6 GB build that aborted at +2.5 MB did so after such a session. With both changes
+6 GB has about 1.4 GB to spare. `web/web_allocwatch.c` (link with `-Wl,--wrap=malloc,...` and set it in
+`CMAKE_EXE_LINKER_FLAGS`; the `twotowers-setup` target does not link with it, build `twotowers_recomp` alone) logs every
+allocation of 1 MB or more with its C stack, and samples the middle sizes; `[MEM]` is a line a second for the first 20 s.

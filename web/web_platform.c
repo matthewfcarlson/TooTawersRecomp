@@ -37,7 +37,7 @@ static void *exit_after(void *p)
 }
 
 /* (leak hunt) The heap is fixed (no growth) and ran out in a long session:
- * every 10 s, how much of it malloc has taken (sbrk), and what is live in it
+ * every 10 s (every second at first), how much of it malloc has taken (sbrk), and what is live in it
  * and how much of that malloc holds free (mallinfo; its ints wrap at 4 GB,
  * hence the unsigned casts). The arena of the guest's 4 GB is one block. TT_WEB_MEMLOG=0 stops it. */
 #ifdef TT_ADDRHIST
@@ -57,18 +57,19 @@ static void addrhist_print(void)
 static void *memlog(void *p)
 {
     size_t last = 0;
+    int n = 0;
     (void)p;
     for (;;) {
         struct mallinfo mi = mallinfo();
         size_t top = (size_t)sbrk(0);
-        fprintf(stderr, "[MEM] heap top %zu MB (%+lld KB in 10 s); malloc live %u MB, free %u MB, mmapped %u MB\n",
+        fprintf(stderr, "[MEM] heap top %zu MB (%+lld KB since the last line); malloc live %u MB, free %u MB, mmapped %u MB\n",
                 top >> 20, (long long)((long long)top - (long long)last) >> 10,
                 (unsigned)mi.uordblks >> 20, (unsigned)mi.fordblks >> 20, (unsigned)mi.hblkhd >> 20);
         last = top;
 #ifdef TT_ADDRHIST
         addrhist_print();
 #endif
-        sleep(10);
+        if (n++ < 20) sleep(1); else sleep(10);   /* the first 20 s a line a second: what start-up takes */
     }
     return NULL;
 }

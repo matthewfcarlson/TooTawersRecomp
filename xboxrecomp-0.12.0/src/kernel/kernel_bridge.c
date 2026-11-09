@@ -530,7 +530,7 @@ static HANDLE bridge_spawn_thread(recomp_func_t fn, uint32_t ctx1,
      * addresses on both machines. */
     s->tib = xbox_AllocThreadTib();
 
-    th = CreateThread(NULL, 0, bridge_thread_main, s, 0, NULL);
+    th = CreateThread(NULL, 64u << 20, bridge_thread_main, s, 0, NULL);   /* (translated code nests deeply: 64 MB, as every thread had) */
     if (th && getenv("RECOMP_GUEST_AFFINITY")) SetThreadAffinityMask(th, 1);
     if (!th) free(s);
     /* Record the game thread so a host-tick-driven title's watchdog can sample

@@ -801,7 +801,14 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
     /* Translated code nests deeply on the native stack: the Windows build
      * links with a 64 MB default stack, which every thread created with a
      * size of 0 inherits. Same here (address space only until touched). */
+#if defined(__EMSCRIPTEN__)
+    /* (web port) 64 MB of the fixed heap for each of the ten helper threads (GPU, timers, watchdogs: shallow code) was
+     * 650 MB of it; those get 8 MB, and the threads that run the game's translated code ask for 64 MB themselves
+     * (kernel_bridge.c bridge_spawn_thread) */
+    pthread_attr_setstacksize(&attr, stackSize < 65536 ? (8u << 20) : stackSize);
+#else
     pthread_attr_setstacksize(&attr, stackSize < 65536 ? (64u << 20) : stackSize);
+#endif
 #if defined(__EMSCRIPTEN__)
     if (w32_next_thread_canvases) {
         emscripten_pthread_attr_settransferredcanvases(&attr, w32_next_thread_canvases);
@@ -817,7 +824,15 @@ HANDLE CreateThread(LPSECURITY_ATTRIBUTES sa, SIZE_T stackSize,
         return NULL;
     }
     pthread_attr_destroy(&attr);
+#if defined(__EMSCRIPTEN__)
+    /* (web port) nothing here ever joins a thread (waits go through the object's condition), so a finished thread kept
+     * its 64 MB stack and its Web Worker for good: the game starts threads around every film and level, and a long
+     * session ran the fixed heap out. Detached, both are given back when it ends. */
+    pthread_detach(o->thread);
+    o->thread_joinable = 0;
+#else
     o->thread_joinable = 1;
+#endif
 
     if (threadId) *threadId = o->tid;
     return (HANDLE)o;
@@ -877,6 +892,9 @@ BOOL TerminateThread(HANDLE h, DWORD exitCode)
 {
     w32_object *o = obj_get(h);
     if (!o || o->kind != K_THREAD) return FALSE;
+#if defined(__EMSCRIPTEN__)
+    if (!o->exited)   /* (detached: a thread that ended is gone) */
+#endif
     pthread_cancel(o->thread);
     pthread_mutex_lock(&o->lock);
     o->exit_code = exitCode;

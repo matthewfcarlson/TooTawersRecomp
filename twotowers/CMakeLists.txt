@@ -190,6 +190,7 @@ endif()
 # One build runs under Node (tests) and in the browser.
 if(EMSCRIPTEN)
     target_sources(${PROJECT_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_platform.c
+                                           ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_allocwatch.c
                                            ${CMAKE_CURRENT_SOURCE_DIR}/../web/web_ultra.cpp)
     target_link_options(${PROJECT_NAME} PRIVATE
         -sMEMORY64=1 -pthread -sWASMFS=1
@@ -197,7 +198,7 @@ if(EMSCRIPTEN)
         # fixed-size memory: WebGL refuses views of a growable (resizable)
         # buffer, and the 4 GB guest arena is reserved up front anyway;
         # untouched pages cost nothing
-        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=8GB
+        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=6GB
         -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=8MB
         -sENVIRONMENT=web,worker,node -sEXIT_RUNTIME=1
         # WebGL2 on the GPU renderer's thread: the page's #screen canvas is
