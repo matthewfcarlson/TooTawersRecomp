@@ -177,3 +177,15 @@ run without drawing, which needs the main loop understood.
   committed (`.gitignore`).
 - Upstream is active (1.9.x releases every few days). Keep our changes in separate files or small, clearly marked
   hunks so `git pull upstream main` stays easy.
+
+## Guest address use (measured 2026-11-09)
+
+Build with `-DTT_ADDRHIST` (the template's counting `XBOX_PTR`; `web/web_platform.c` prints `[ADDR]` every 10 s) and
+run a level start: of 3.9 billion guest accesses, 63% were in 0x00000000-0x017FFFFF (16 MB touched) and 37% in
+0x80000000-0x83EFFFFF (31 MB touched: the game's own code uses the contiguous-memory window, not only the XDK);
+the GPU and APU windows (0xFD..., 0xFE...) took 0.01%; nothing at all between 0x04000000 and 0x7FFFFFFF, or 0x84000000
+and 0xFCFFFFFF. The low and high windows are separate storage today (mirrors are refused) and the game plays. So a
+compact arena of three 64 MB slots (low, 0x80000000, 0xFC000000) would hold everything the game touches:
+`lin = ((t >> 5) + (t & 1)) << 26 | (a & 0x3FFFFFF)` with `t = a >> 26`, in place of 4 GB. The cost is every
+guest-to-host conversion: `XBOX_PTR`, `XBOX_TO_NATIVE` (about 360 uses outside the generated code) and 77 direct
+`+ g_xbox_mem_offset` uses, plus the inverse (host pointer back to a guest address: `kernel_rtl.c`, the fault handler).

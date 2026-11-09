@@ -40,6 +40,20 @@ static void *exit_after(void *p)
  * every 10 s, how much of it malloc has taken (sbrk), and what is live in it
  * and how much of that malloc holds free (mallinfo; its ints wrap at 4 GB,
  * hence the unsigned casts). The arena of the guest's 4 GB is one block. TT_WEB_MEMLOG=0 stops it. */
+#ifdef TT_ADDRHIST
+unsigned g_addrhist[4096];
+static void addrhist_print(void)
+{
+    int i, lo = -1;
+    unsigned long long tot = 0, run = 0;
+    for (i = 0; i < 4096; i++) tot += g_addrhist[i];
+    fprintf(stderr, "[ADDR] %llu guest accesses; 1 MB blocks touched, by range:\n", tot);
+    for (i = 0; i <= 4096; i++) {
+        if (i < 4096 && g_addrhist[i]) { if (lo < 0) lo = i; run += g_addrhist[i]; }
+        else if (lo >= 0) { fprintf(stderr, "[ADDR]   %08X-%08X  %llu accesses (%.3f%%)\n", (unsigned)lo << 20, ((unsigned)i << 20) - 1, run, tot ? run * 100.0 / tot : 0.0); lo = -1; run = 0; }
+    }
+}
+#endif
 static void *memlog(void *p)
 {
     size_t last = 0;
@@ -51,6 +65,9 @@ static void *memlog(void *p)
                 top >> 20, (long long)((long long)top - (long long)last) >> 10,
                 (unsigned)mi.uordblks >> 20, (unsigned)mi.fordblks >> 20, (unsigned)mi.hblkhd >> 20);
         last = top;
+#ifdef TT_ADDRHIST
+        addrhist_print();
+#endif
         sleep(10);
     }
     return NULL;
