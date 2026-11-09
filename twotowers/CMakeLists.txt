@@ -197,7 +197,7 @@ if(EMSCRIPTEN)
         # fixed-size memory: WebGL refuses views of a growable (resizable)
         # buffer, and the 4 GB guest arena is reserved up front anyway;
         # untouched pages cost nothing
-        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=6GB
+        -sALLOW_MEMORY_GROWTH=0 -sINITIAL_MEMORY=8GB
         -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=8MB
         -sENVIRONMENT=web,worker,node -sEXIT_RUNTIME=1
         # WebGL2 on the GPU renderer's thread: the page's #screen canvas is

@@ -17,7 +17,7 @@ Written 2026-10-22, at the start of the fork; the status below was updated 2026-
 in a level, sound, keyboard and controllers, saves kept in the browser, and the Ultra textures (the GLOS69 pack).
 One build (wasm64, pthreads, WasmFS) runs in the page and under Node for tests. What it took:
 
-- **Memory:** the guest's 4 GB as one untouched allocation in a fixed 6 GB linear memory, views claimed at
+- **Memory:** the guest's 4 GB as one untouched allocation in a fixed 8 GB linear memory, views claimed at
   `va + offset` as on the desktop (`win32_compat_wasm_mem.inc`). Second views can't alias: the RAM mirrors and the
   tiled view at 0xF0000000 are refused and logged; the game plays without them.
 - **Device traps:** only the APU (pointer accesses from DirectSound) and AC'97 trapped on the desktop; the GPU never

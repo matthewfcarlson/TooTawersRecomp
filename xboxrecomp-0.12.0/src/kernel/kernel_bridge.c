@@ -1338,16 +1338,22 @@ static void bridge_ExAllocatePoolWithTag(void)
 
 /* ── KfRaiseIrql / KfLowerIrql (ordinals 160, 161) ────── */
 RECOMP_TLS void *g_kernel_host_ra;    /* host code that made this kernel call (diagnostics) */
+/* (web port) in WebAssembly the return address is a JS stack trace built on every call (1.7 s of 40 in the profile) */
+#ifdef __EMSCRIPTEN__
+#define HOST_RA() ((void *)0)
+#else
+#define HOST_RA() __builtin_return_address(0)
+#endif
 static void bridge_KfRaiseIrql(void)
 {
-    g_kernel_host_ra = __builtin_return_address(0);
+    g_kernel_host_ra = HOST_RA();
     uint32_t new_irql = g_ecx; /* fastcall: KIRQL is passed in CL */
     g_eax = (uint32_t)xbox_KfRaiseIrql((UCHAR)new_irql);
 }
 
 static void bridge_KfLowerIrql(void)
 {
-    g_kernel_host_ra = __builtin_return_address(0);
+    g_kernel_host_ra = HOST_RA();
     uint32_t new_irql = g_ecx; /* fastcall: KIRQL is passed in CL */
     xbox_KfLowerIrql((UCHAR)new_irql);
     g_eax = 0;
@@ -1356,7 +1362,7 @@ static void bridge_KfLowerIrql(void)
 /* ── KeRaiseIrqlToDpcLevel (ordinal 129) ─────────────────── */
 static void bridge_KeRaiseIrqlToDpcLevel(void)
 {
-    g_kernel_host_ra = __builtin_return_address(0);
+    g_kernel_host_ra = HOST_RA();
     g_eax = (uint32_t)xbox_KeRaiseIrqlToDpcLevel();
 }
 

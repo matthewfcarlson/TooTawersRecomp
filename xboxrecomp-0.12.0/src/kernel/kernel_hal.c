@@ -21,6 +21,8 @@
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma intrinsic(_ReturnAddress)
 #define IRQL_CALLER() _ReturnAddress()
+#elif defined(__EMSCRIPTEN__)
+#define IRQL_CALLER() ((void *)0)   /* (web port) a JS stack trace per call */
 #else
 #define IRQL_CALLER() __builtin_return_address(0)
 #endif

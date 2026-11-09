@@ -27,12 +27,33 @@
 #include <fcntl.h>
 #include <emscripten.h>
 #include <emscripten/wasmfs.h>
+#include <malloc.h>
 
 static void *exit_after(void *p)
 {
     sleep((unsigned)(uintptr_t)p);
     fprintf(stderr, "[WEB] TT_WEB_EXIT_AFTER: %u s, ending the run\n", (unsigned)(uintptr_t)p);
     exit(0);
+}
+
+/* (leak hunt) The heap is fixed (no growth) and ran out in a long session:
+ * every 10 s, how much of it malloc has taken (sbrk), and what is live in it
+ * and how much of that malloc holds free (mallinfo; its ints wrap at 4 GB,
+ * hence the unsigned casts). The arena of the guest's 4 GB is one block. TT_WEB_MEMLOG=0 stops it. */
+static void *memlog(void *p)
+{
+    size_t last = 0;
+    (void)p;
+    for (;;) {
+        struct mallinfo mi = mallinfo();
+        size_t top = (size_t)sbrk(0);
+        fprintf(stderr, "[MEM] heap top %zu MB (%+lld KB in 10 s); malloc live %u MB, free %u MB, mmapped %u MB\n",
+                top >> 20, (long long)((long long)top - (long long)last) >> 10,
+                (unsigned)mi.uordblks >> 20, (unsigned)mi.fordblks >> 20, (unsigned)mi.hblkhd >> 20);
+        last = top;
+        sleep(10);
+    }
+    return NULL;
 }
 
 /* A folder from the page's server, at mount (/disc, /ultra): the manifest
@@ -175,6 +196,10 @@ void tt_web_init(int argc, char **argv)
         pthread_t th;
         pthread_create(&th, NULL, exit_after, (void *)(uintptr_t)atoi(getenv("TT_WEB_EXIT_AFTER")));
         pthread_detach(th);
+    }
+    if (!getenv("TT_WEB_MEMLOG") || atoi(getenv("TT_WEB_MEMLOG"))) {
+        pthread_t th;
+        if (!pthread_create(&th, NULL, memlog, NULL)) pthread_detach(th);
     }
     if (!getenv("TT_WEB_HOME")) setenv("TT_WEB_HOME", "/home/web_user", 1);
     mkdir(getenv("TT_WEB_HOME"), 0777);

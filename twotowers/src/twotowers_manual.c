@@ -119,6 +119,26 @@ void sub_00100F50(void)
  * an all-digit value is returned as a pointer to an int, anything else as a
  * pointer to the string, as the game reads each. Values live in the unused
  * table's own memory. Without TT_TWEAKS every lookup misses, as on retail. */
+/* (soak) TT_TWEAKS LEVEL=a,b,c: each level the game loads takes the next name, round and round (for TT_SOAK). The game
+ * asks twice -- is there one, then its value; the return address 0x000D1AD1 is the value, and the turn moves on after
+ * it. The name is written into the value's own slot, which has room for the whole list. */
+static void tt_level_rotate(uint32_t slot, uint32_t ret)
+{
+    static char el[8][48]; static int init, cnt, idx;
+    if (!init) {
+        char list[48], *t; int k;
+        init = 1;
+        for (k = 0; k < 47 && MEM8(slot + k); k++) list[k] = (char)MEM8(slot + k);
+        list[k] = 0;
+        for (t = strtok(list, ","); t && cnt < 8; t = strtok(NULL, ",")) { strncpy(el[cnt], t, 47); cnt++; }
+        if (cnt > 1) tt_dbg("[SOAK] %d levels in turn, from %s\n", cnt, el[0]);
+    }
+    if (cnt > 1) {
+        size_t k, L = strlen(el[idx]);
+        for (k = 0; k <= L; k++) MEM8(slot + k) = (uint8_t)el[idx][k];
+        if (ret == 0x000D1AD1u) { idx = (idx + 1) % cnt; tt_dbg("[SOAK] level load; next is %s\n", el[idx]); }
+    }
+}
 extern void sub_000E3AF0_gen(void);
 void sub_000E3AF0(void)
 {
@@ -161,7 +181,11 @@ void sub_000E3AF0(void)
         for (i = 0; i < 63 && MEM8(key + i); i++) k[i] = (char)MEM8(key + i);
         k[i] = 0;
         for (i = 0; i < n; i++)
-            if (!_stricmp(names[i], k)) { eax = vals[i]; break; }
+            if (!_stricmp(names[i], k)) {
+                eax = vals[i];
+                if (!_stricmp(k, "LEVEL")) tt_level_rotate(eax, MEM32(esp));
+                break;
+            }
     }
     esp += 4;   /* ret (cdecl) */
 }
@@ -712,6 +736,7 @@ void sub_000E3350(void)
         }
     }
 }
+extern int xbox_MoviePlaying(void);
 static void tt_frametime(void)
 {
     static int off = -1;
@@ -795,6 +820,30 @@ static void tt_frametime(void)
      * the timer in a tight loop, and the world's step was 0 there -- left so) */
     /* (1.9.5: no longer left out -- frames a catch-up let through back to
      * back could be under half a millisecond, and the world lost them) */
+    {   /* (soak) TT_SOAK=<seconds>: that long in play (no film, the shot's mode), then the hero is killed, and the game
+         * goes through its death and level load again: several levels back to back for the memory and slowdown logs */
+        static int secs = -1; static uint32_t t0; extern uint32_t tt_clock_ms(void);
+        if (secs < 0) { const char *e = getenv("TT_SOAK"); secs = e ? atoi(e) : 0; }
+        if (secs > 0) {
+            uint32_t p = MEM32(0x43B15Cu), now = tt_clock_ms();
+            if (MEM32(0x4AD050u) != 6 || xbox_MoviePlaying() || !p) t0 = 0;
+            else if (!t0) t0 = now;
+            else if (now - t0 > (uint32_t)secs * 1000u) { extern void sub_000838E0_gen(void); uint32_t sp = esp, r0 = eax, r1 = ecx, r2 = edx;
+                tt_dbg("[SOAK] %d s in play: the hero falls\n", secs); MEM32(p + 0x2FC) = 0; t0 = 0;
+                PUSH32(esp, 0x000838E0u); ecx = p; sub_000838E0_gen();   /* the die method, as the co-op code calls it */
+                esp = sp; eax = r0; ecx = r1; edx = r2; }
+        }
+    }
+    {   /* (profiling) a step much over its time, and a film starting or ending, with the game's mode: where the
+         * chugging around films begins. TT_SLOWLOG=<ms> moves the limit (default 60). */
+        static int lim = -1, mv = -1; static uint32_t mode0 = ~0u; static unsigned n;
+        int m = xbox_MoviePlaying() ? 1 : 0; uint32_t mode = MEM32(0x4AD050u);
+        if (lim < 0) { const char *e = getenv("TT_SLOWLOG"); lim = e ? atoi(e) : 60; }
+        n++;
+        if (m != mv || mode != mode0) tt_dbg("  [FILMSTATE] step %u: film %d, game mode %u (was film %d, mode %u)\n", n, m, mode, mv, mode0);
+        mv = m; mode0 = mode;
+        if (ms > (float)lim) tt_dbg("  [SLOW] step %u took %.0f ms (film %d, game mode %u)\n", n, ms, m, mode);
+    }
     {   /* for the log: the world's whole-ms time against the real time, every 10 s */
         static double real, world_before, world_after; static unsigned frames;
         real += ms; world_before += (int)ms; frames++;
