@@ -133,7 +133,7 @@ static void np_script_frame(uint32_t fr)
 #define NP_EXPORT
 #endif
 #define NP_RING 256
-static int s_net, s_delay = 3;
+static int s_net, s_delay = 3;   /* (the start's delay: np_adapt) */
 static volatile int s_net_role = -1;   /* 0 host (player 1), 1 guest (player 2); -1 not known yet */
 static struct { volatile uint32_t frame; TTPadState st; uint32_t ev; } s_remote[NP_RING];
 static struct { uint32_t frame; TTPadState st; uint32_t ev; } s_local[NP_RING];   /* (ev: the host's sound end, np_snd_*) */
@@ -244,25 +244,60 @@ static void np_snd_frame(uint32_t fr, uint32_t ev)
     s_snd_ndue = n;
 }
 
+/* (adaptive delay) The delay the local input is sent ahead by changes during the session without the other machine
+ * being told: s_delay (the start's, TT_NETPLAY_DELAY) only says which first frames have no input, the same on both.
+ * Frame t's local input is sampled once, at the first frame whose lead reaches t; s_sent_hi is the newest frame
+ * given one. A longer lead fills the frames between with the same sample (a held pad); a shorter one skips the
+ * frames already given (their inputs have gone out, a second for the same frame would not match). The page measures
+ * the round trip (netplay.js) and says the lead wanted (tt_np_set_delay); a frame the game waited on the other
+ * player for adds up to NP_EXTRA_MAX on top, and the lead falls one frame at a time after 2 s that wanted less. */
+#define NP_DELAY_MAX 12
+#define NP_EXTRA_MAX 3
+static volatile int s_dwant = -1;
+static int s_dcur, s_dextra, s_dstable, s_dstalls, s_dwin, s_dcalm;
+static uint32_t s_sent_hi;
+NP_EXPORT void tt_np_set_delay(int d) { s_dwant = d < 1 ? 1 : d > NP_DELAY_MAX ? NP_DELAY_MAX : d; }
+NP_EXPORT int tt_np_get_delay(void) { return s_dcur; }
+static void np_adapt(uint32_t fr)
+{
+    int want;
+    if (!s_dcur) s_dcur = s_delay;
+    if (++s_dwin >= 90) {   /* (3 s of frames: how many waited on the other player) */
+        if (s_dstalls >= 3 && s_dextra < NP_EXTRA_MAX) { s_dextra++; s_dcalm = 0; }
+        else if (!s_dstalls && s_dextra > 0 && ++s_dcalm >= 4) { s_dextra--; s_dcalm = 0; }
+        s_dstalls = s_dwin = 0;
+    }
+    want = s_dwant < 0 ? s_delay : s_dwant + s_dextra;
+    if (want > NP_DELAY_MAX) want = NP_DELAY_MAX;
+    if (want > s_dcur) { s_dcur = want; s_dstable = 0; fprintf(stderr, "  [NETPLAY] frame %u: input delay up to %d frames\n", fr, s_dcur); }
+    else if (want < s_dcur) { if (++s_dstable >= 60) { s_dcur--; s_dstable = 0; fprintf(stderr, "  [NETPLAY] frame %u: input delay down to %d frames\n", fr, s_dcur); } }
+    else s_dstable = 0;
+}
+
 static void np_net_frame(uint32_t fr)
 {
     TTPadState mine, none;
-    uint32_t t = fr + (uint32_t)s_delay, k;
+    uint32_t t, k;
     memset(&none, 0, sizeof none);
-    /* the local player's input now is frame fr + D's */
+    np_adapt(fr);
+    if (!s_sent_hi) s_sent_hi = (uint32_t)s_delay;
+    /* the local player's input now is the input of the frames from the last given to fr + the delay */
     if (xbox_InputGetStateLocal(0, &mine) != 0) memset(&mine, 0, sizeof mine);
     {   extern uint32_t xbox_FilmId(void);
         mine.Gamepad.wButtons &= (uint16_t)~NP_FILM_VOTE;
         if (s_film_vote && s_film_vote == xbox_FilmId()) mine.Gamepad.wButtons |= NP_FILM_VOTE; }   /* (a film's skip) */
-    s_local[t & (NP_RING - 1)].frame = t;
-    s_local[t & (NP_RING - 1)].st = mine;
-    s_local[t & (NP_RING - 1)].ev = s_net_role == 0 && s_snd_qh != s_snd_qt ? s_snd_queue[s_snd_qh++ % 64u] : 0;   /* (a sound's end, np_snd_*) */
+    for (t = s_sent_hi + 1; t <= fr + (uint32_t)s_dcur; t++) {
+        s_local[t & (NP_RING - 1)].frame = t;
+        s_local[t & (NP_RING - 1)].st = mine;
+        s_local[t & (NP_RING - 1)].ev = s_net_role == 0 && t == fr + (uint32_t)s_dcur && s_snd_qh != s_snd_qt ? s_snd_queue[s_snd_qh++ % 64u] : 0;   /* (a sound's end, np_snd_*) */
 #if defined(__EMSCRIPTEN__)
-    MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttNetInput) Module.ttNetInput($0, $1, $2, $3, $4, $5, $6, $7, $8); },
-        (int)t, (int)mine.Gamepad.wButtons, (int)np_pack(mine.Gamepad.bAnalogButtons), (int)np_pack(mine.Gamepad.bAnalogButtons + 4),
-        (int)mine.Gamepad.sThumbLX, (int)mine.Gamepad.sThumbLY, (int)mine.Gamepad.sThumbRX, (int)mine.Gamepad.sThumbRY,
-        (int)s_local[t & (NP_RING - 1)].ev);
+        MAIN_THREAD_ASYNC_EM_ASM({ if (Module.ttNetInput) Module.ttNetInput($0, $1, $2, $3, $4, $5, $6, $7, $8); },
+            (int)t, (int)mine.Gamepad.wButtons, (int)np_pack(mine.Gamepad.bAnalogButtons), (int)np_pack(mine.Gamepad.bAnalogButtons + 4),
+            (int)mine.Gamepad.sThumbLX, (int)mine.Gamepad.sThumbLY, (int)mine.Gamepad.sThumbRX, (int)mine.Gamepad.sThumbRY,
+            (int)s_local[t & (NP_RING - 1)].ev);
 #endif
+        s_sent_hi = t;
+    }
     /* this frame's: none for the first D, then both players' */
     k = fr & (NP_RING - 1);
     {
@@ -276,6 +311,7 @@ static void np_net_frame(uint32_t fr)
 #endif
                 if (++waited % 8000 == 0) fprintf(stderr, "  [NETPLAY] frame %u: waiting for the other player (%u s)\n", fr, waited / 4000);
             }
+            if (waited >= 16) s_dstalls++;   /* (4 ms or more waiting: the lead was too short) */
             remote = s_remote[k].st;
         }
         while (s_net_role < 0) {   /* (the first frames too need to know which player is which) */

@@ -29,6 +29,13 @@
 // at most twice in 10 minutes (sessionStorage tt-desyncs), then they only say
 // so. An address with the game's own switches (TT_..., the test tools) only
 // reports it, as before.
+// Adaptive delay: the page pings every 250 ms, keeps the last 20 round trips, and tells the game the lead it wants
+// (tt_np_set_delay: the 90th percentile of the one-way time plus 10 ms, in 30 Hz frames; tt_netplay.c np_adapt makes
+// it up or down without the other machine being told). An address with TT_NETPLAY_DELAY=N pins the lead (adaptive off).
+//
+// A bad network on a good one (testing): &simlat=<ms> delays every packet arriving here by that long, &simjitter=<ms>
+// adds up to that much more at random (so packets also arrive out of order, as unordered UDP does), &simloss=<%>
+// drops them. Each side delays its incoming packets: a round trip is twice simlat, plus the two jitters.
 (function () {
   const q = new URLSearchParams(location.search);
   const code = q.get('match');
@@ -131,7 +138,27 @@
   function sendInputs() { if (newestSent) sendRaw(packet()); }
 
   // --- to the game -----------------------------------------------------------
+  const SIM = { lat: Number(q.get('simlat')) || 0, jitter: Number(q.get('simjitter')) || 0, loss: Number(q.get('simloss')) || 0 };
+  const simulated = SIM.lat > 0 || SIM.jitter > 0 || SIM.loss > 0;
   function receive(data) {
+    if (!simulated) return receiveNow(data);
+    if (Math.random() * 100 < SIM.loss) return;
+    const copy = (data instanceof ArrayBuffer ? new Uint8Array(data.slice(0)) : new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength))).buffer;
+    setTimeout(() => receiveNow(copy), SIM.lat + Math.random() * SIM.jitter);
+  }
+  // the lead wanted, from the round trips (see the header)
+  const FRAME_MS = 1000 / 30, rtts = [];
+  let lastWant = 0;
+  function adapt(rtt) {
+    rtts.push(rtt); if (rtts.length > 20) rtts.shift();
+    if (rtts.length < 4 || q.has('TT_NETPLAY_DELAY') || !Module.ttReady || !Module._tt_np_set_delay) return;
+    const sorted = rtts.slice().sort((a, b) => a - b);
+    const p90 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.9))];
+    const want = Math.max(1, Math.ceil((p90 / 2 + 10) / FRAME_MS));
+    if (want !== lastWant) { lastWant = want; log(`round trips ${sorted[0].toFixed(0)}-${p90.toFixed(0)} ms (90th percentile): lead ${want} frames`); }
+    Module._tt_np_set_delay(want);
+  }
+  function receiveNow(data) {
     const v = new DataView(data instanceof ArrayBuffer ? data : data.buffer, data.byteOffset ?? 0);
     const type = v.getUint8(0);
     if (type === 1) {
@@ -148,6 +175,7 @@
       sendRaw(pong);
     } else if (type === 3) {
       state.rtt = performance.now() - v.getFloat64(1, true);
+      adapt(state.rtt);
       show();
     }
   }
@@ -155,7 +183,7 @@
     const p = new DataView(new ArrayBuffer(9)); p.setUint8(0, 2); p.setFloat64(1, performance.now(), true);
     sendRaw(new Uint8Array(p.buffer));
     sendInputs();   // (a lull in the game's frames: the last ones again)
-  }, 1000);
+  }, 250);
 
   // --- the match and the data channel ----------------------------------------
   async function iceServers() {
