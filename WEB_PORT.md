@@ -135,6 +135,24 @@ is too slow in a browser. Options: dirty-page tracking (possible in the checked/
 the structures that hold simulation state once they're known. Re-simulating several frames also needs the game loop
 run without drawing, which needs the main loop understood.
 
+**Rollback, first experiment (`twotowers/src/tt_rollback.c`, `TT_RB_TEST=n:m`).** At play frame n the guest's RAM
+(64 MB at 0x10000 and the 64 MB contiguous window, separate storage here) and registered host-side variables
+(`tt_rb_reg`: the frame counters, `tt_game_ms`, the fixed-step sum) are copied; at n+m the end is kept, the copy is
+written back, the frame counter set to n, and the m frames run again with the same scripted inputs; then every live
+actor's position (those that moved in the first pass; dead objects differ between any two runs) is compared.
+- Cost, native Node: snapshot 11-25 ms (up to 55 ms under load), restore 8-30 ms. Too much for every frame at 30 fps
+  in wasm: needs dirty-page tracking (or snapshots of the simulation structures only).
+- **A RAM-only restore does not replay the same game.** Replayed from frame 200 or 900 of Weathertop, every
+  live actor diverges 1-44 frames in (usually +3), by small amounts. So state outside guest RAM matters: file/stream
+  handles and async loads, the other threads (render, audio, Bink, loader), the NV2A/APU emulation, and other C statics.
+  Not yet found which. Next: restore with the other threads parked at the frame boundary, then bisect by adding
+  registered state (kernel file positions and the GPU/APU state first); the "+3 frames" suggests a 3-frame pipeline.
+- Harness: `node web/run-node.mjs ... TT_NETINPUT_SCRIPT=/host<script> TT_RB_TEST=200:60 TT_WEB_LOGALL=1`
+  (levels via `TT_TWEAKS=SKIPMAINMENU=1;HERO=aragorn;LEVEL=01WEAT1`, `TT_COOP=clone`); the software renderer runs a few
+  frames/s, so a test at frame 900 takes ~6 minutes.
+- Adaptive delay (done): the page measures round trips every 250 ms and sets the lead (`tt_np_set_delay`);
+  `&simlat=&simjitter=&simloss=` simulates a bad network for testing.
+
 **Zero-code fallback:** Parsec or Steam Remote Play Together on the native co-op build.
 
 ## Visuals

@@ -157,6 +157,8 @@ static uint64_t sh_actors_changed(void)
 }
 
 /* (netplay) the simulation's hash now, for the desync check (tt_netplay.c) */
+uint64_t tt_statehash_whole(void) { return sh_actors_whole(); }
+uint64_t tt_statehash_pos(void) { uint32_t n; return sh_actors(&n); }   /* (rollback experiment, tt_rollback.c: stateless) */
 uint64_t tt_statehash_sim(void)
 {
     return sh_actors_changed();

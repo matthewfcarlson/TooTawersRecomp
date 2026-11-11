@@ -564,6 +564,12 @@ void tt_netplay_frame(void)
     else if (st != 6 && st != 8) { s_frame = 0; return; }
     if (s_tick_kind != 1) return;   /* (a load's tick: the frame's input stays latched) */
     s_frame++;
+    {   extern int tt_rb_test(volatile uint32_t *frame);   /* (rollback experiment, tt_rollback.c: TT_RB_TEST=n:m) */
+        extern void tt_rb_reg(void *p, size_t n);
+        extern volatile uint32_t tt_frame_waits;
+        tt_rb_reg((void *)&s_play_frames, sizeof s_play_frames); tt_rb_reg((void *)&s_menu_frames, sizeof s_menu_frames);
+        tt_rb_reg(&s_level_started, sizeof s_level_started);
+        tt_rb_test(&s_frame); }
     if (s_net) np_net_frame(s_frame);
     else np_script_frame(s_frame);
     {   /* testing: a wait for the other player, without one */

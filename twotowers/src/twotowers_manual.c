@@ -743,6 +743,8 @@ static void tt_frametime(void)
     static double carry;
     float ms;
     sub_000E3350_gen();
+    {   extern void tt_rb_reg(void *p, size_t n);   /* (rollback: the host-side clocks, tt_rollback.c) */
+        static int rg; if (!rg) { rg = 1; tt_rb_reg((void *)&tt_game_ms, sizeof tt_game_ms); tt_rb_reg((void *)&tt_lvl_ms, sizeof tt_lvl_ms); tt_rb_reg(&carry, sizeof carry); } }
     { uint32_t w0 = MEM32(0x4B8B98u); memcpy(&tt_real_ms, &w0, 4); }
     {   /* testing: TT_FAKE_FRAME_MS=x -- every frame's time is x ms, as at 1000/x fps */
         static float fake = -1.0f;
@@ -786,6 +788,7 @@ static void tt_frametime(void)
                 static const float SUM_MARK = 1.0e9f;
                 static double sum_s;
                 float rs, sums, summs;
+                {   extern void tt_rb_reg(void *p, size_t n); static int rg; if (!rg) { rg = 1; tt_rb_reg(&sum_s, sizeof sum_s); } }
                 uint32_t real_s = MEM32(0x4B8BC0u), real_ms = MEM32(0x4B8BB8u);
                 { uint32_t r0 = MEM32(0x4B8BBCu); memcpy(&rs, &r0, 4); }
                 if (rs < SUM_MARK * 0.5f) sum_s = 0.0;
